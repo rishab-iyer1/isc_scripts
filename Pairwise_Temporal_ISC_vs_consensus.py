@@ -7,6 +7,7 @@ import os
 import pickle
 from glob import glob
 from os.path import join
+import time
 
 import numpy as np
 import pandas as pd
@@ -116,4 +117,17 @@ df_consensus = np.mean(rolling_mean, axis=1)
 #                   f"{corrs_roi[roi].loc[emotions[emotion]]['p']:.3f}")
 
 # do the correlation voxelwise, ISC vs consensus
+start = time.time()
 s_map = np.empty(shape=(iscs_roi_selected['wholebrain'].shape[1], 2))
+x = iscs_roi_selected['wholebrain']
+for i in range(x.shape[0]):
+    s_map[i] = pearsonr(x.T[i], df_consensus[:, 2])
+end = time.time()
+print(end - start)
+print(s_map.shape)
+
+rng = np.random.default_rng()
+n_perm = 10
+perm = np.empty(shape=(n_perm, iscs_roi_selected['wholebrain'].shape[1], 2))
+for i in range(n_perm):
+    perm[i] = pearsonr(x.T[i], rng.permutation(df_consensus[:, 2]))
