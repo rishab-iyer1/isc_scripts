@@ -8,6 +8,7 @@ import pickle
 from glob import glob
 from os.path import join
 import time
+import tqdm
 
 import numpy as np
 import pandas as pd
@@ -120,14 +121,27 @@ df_consensus = np.mean(rolling_mean, axis=1)
 start = time.time()
 s_map = np.empty(shape=(iscs_roi_selected['wholebrain'].shape[1], 2))
 x = iscs_roi_selected['wholebrain']
+print('computing s_map')
 for i in range(x.shape[0]):
     s_map[i] = pearsonr(x.T[i], df_consensus[:, 2])
+    
+# save s_map to pickle
+with open(f"{data_path}/s_map.pkl", 'wb') as f:
+    pickle.dump(s_map, f)
+
+start = time.time()
+rng = np.random.default_rng()
+n_perm = 10000
+perm = np.empty(shape=(n_perm, x.shape[1], 2))
+for i in tqdm(range(n_perm)):
+    # if i%1000==0 or i==100:
+    #     print(f"permutation {i}")
+    for j in range(x.shape[0]):
+        perm[i, j] = pearsonr(x.T[j], rng.permutation(df_consensus[:, 2]))
 end = time.time()
 print(end - start)
-print(s_map.shape)
 
-rng = np.random.default_rng()
-n_perm = 10
-perm = np.empty(shape=(n_perm, iscs_roi_selected['wholebrain'].shape[1], 2))
-for i in range(n_perm):
-    perm[i] = pearsonr(x.T[i], rng.permutation(df_consensus[:, 2]))
+# save perm to pickle
+with open(f"{data_path}/perm{n_perm}.pkl", 'wb') as f:
+    pickle.dump(perm, f)
+
