@@ -133,7 +133,6 @@ if not os.path.exists(perm_path):  # only compute if file DNE
         for i in tqdm(range(n_perm)):  # number of permutations to loop over
             for j in range(isc_wholebrain.shape[1]):  # number of voxels
                 perm[e, i, j] = pearsonr(isc_wholebrain.T[j], rng.permutation(df_consensus[:, e]))
-
     # save perm to pickle
     with open(perm_path, 'wb') as f:
         pickle.dump(perm, f)
