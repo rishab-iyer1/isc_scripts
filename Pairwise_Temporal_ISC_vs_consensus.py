@@ -122,51 +122,58 @@ df_consensus = np.mean(rolling_mean, axis=1)
 n_perm = 100
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
+n_emo = 3
 
 # loop through emotions pos, neg, mix, (skip neutral)
-for e, emo in enumerate(emotions[:3]):
-    perm_path = f"{data_path}/perm_{emo}_{n_perm}.pkl"
-    if not os.path.exists(perm_path):  # only compute if file DNE
-        rng = np.random.default_rng()
-        perm = np.empty(shape=(n_perm, isc_wholebrain.shape[1], 2))
+perm = np.empty(shape=(n_emo, n_perm, isc_wholebrain.shape[1], 2))  # 3 emotions, n_perm, n_voxels, r and p
+perm_path = f"{data_path}/perm_{n_perm}.pkl"
+if not os.path.exists(perm_path):  # only compute if file DNE
+    rng = np.random.default_rng()
+    for e, emo in tqdm(enumerate(emotions[:n_emo])):
         for i in tqdm(range(n_perm)):  # number of permutations to loop over
             for j in range(isc_wholebrain.shape[1]):  # number of voxels
-                perm[i, j] = pearsonr(isc_wholebrain.T[j], rng.permutation(df_consensus[:, e]))  # both size (n_pairs)
+                perm[e, i, j] = pearsonr(isc_wholebrain.T[j], rng.permutation(df_consensus[:, e]))
 
-        # save perm to pickle
-        with open(perm_path, 'wb') as f:
-            pickle.dump(perm, f)
-    will override right now, decide whether to load all three in memory?
-    else:
-        with open(perm_path, 'rb') as f:
-            perm = pickle.load(f)
+    # save perm to pickle
+    with open(perm_path, 'wb') as f:
+        pickle.dump(perm, f)
+else:
+    with open(perm_path, 'rb') as f:
+        perm = pickle.load(f)
 
+s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
 if not os.path.exists(f"{data_path}/s_map.pkl"):
     # do the correlation voxelwise, ISC vs consensus
-    s_map = np.empty(shape=(iscs_roi_selected['wholebrain'].shape[1], 2))
     print('computing s_map')
-    for i in range(isc_wholebrain.shape[1]):
-        s_map[i] = pearsonr(isc_wholebrain.T[i], df_consensus[:, 2])
-else:
-    with open(f"{data_path}/s_map.pkl", 'rb') as f:
-        s_map = pickle.load(f)
+    for e, emo in tqdm(enumerate(emotions[:n_emo])):
+        for i in range(isc_wholebrain.shape[1]):
+            s_map[e, i] = pearsonr(isc_wholebrain.T[i], df_consensus[:, e])
 
     # save s_map to pickle
     with open(f"{data_path}/s_map.pkl", 'wb') as f:
         pickle.dump(s_map, f)
 
+else:
+    with open(f"{data_path}/s_map.pkl", 'rb') as f:
+        s_map = pickle.load(f)
+
+assert np.sum(s_map) > 0
+assert np.sum(perm) > 0
+
 # view histogram
-plt.hist(perm[:, 0, 0], bins=100)
+plt.hist(perm[0, :, 0, 0], bins=100)
+plt.title('Histogram of permuted correlations for pos emotion in one voxel')
 plt.show()
 
-# get the 95% confidence threshold based on permutation tes
-# vox = perm[:, 0, 0].deepcopy()
+# get the 95% confidence threshold based on permutation tests
+# vox = perm[:, :, 0, 0].deepcopy()
 # vox.sort()
 # thresh = vox[-alpha]
 
 # now get a 95% threshold for each voxel using np argsort
-# for voxel in range(perm.shape[1]):
-#     thresh = perm[np.argsort(perm[:, voxel, 0], axis=0)[-alpha], voxel, 0]
+thresh = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], ))
+for voxel in range(perm.shape[1]):
+    thresh = perm[np.argsort(perm[:, :, voxel, 0], axis=0)[-alpha], voxel, 0]
 
 mask_img = np.load(f"{data_path}/mask_img.npy")
 ref_nii = nib.load(f"{data_path}/ref_nii.nii.gz")
@@ -177,7 +184,8 @@ def plot_brain_from_np(ref, mask, data, data_name):
     Given a reference nifti file, a mask, and an isc map, plot the isc map on the reference brain
     :param ref: reference nifti file
     :param mask: mask image
-    :param data:
+    :param data: vectorized brain data
+    :param data_name: filename to save
     :return:
     """
     from nilearn.plotting import plot_stat_map
@@ -215,18 +223,5 @@ def plot_brain_from_np(ref, mask, data, data_name):
 plot_brain_from_np(ref_nii, mask_img, s_map[:, 0], 's_map')
 
 # create a p_map which contains the p-value of the s_map using the permutation tests
-p_map = np.empty(shape=(s_map.shape[0]))
-for voxel in range(s_map.shape[0]):
-    p_map[voxel] = np.sum(perm[:, voxel, 0] >= s_map[voxel, 0]) / n_perm
-
-p_map[p_map == 0] += 1e-8
-p_map[p_map == 1] -= 1e-8
-
-# convert to z map
-z_map = norm.ppf(1 - (p_map / 2))
-
-# use nilearn.glm.fdr_threshold to get a thresholded map
-thresh = fdr_threshold(z_map, alpha=0.05)
-thresh_z = z_map * (z_map > thresh)
-
-plot_brain_from_np(ref_nii, mask_img, thresh_z, 'thresh_z')
+# p_map = np.empty(shape=(s_map.shape[0]))
+# for voxel

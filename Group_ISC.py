@@ -40,7 +40,7 @@ if not os.path.exists('../data/mask_img.npy'):
     mask_img = load_boolean_mask(mask_fn)
     np.save('../data/mask_img.npy', mask_img)
 else:
-    mask_img = nib.load('../data/mask_img.npy')
+    mask_img = np.load('../data/mask_img.npy')
 
 
 if not os.path.exists('../data/mask_coords.npy'):
@@ -48,7 +48,7 @@ if not os.path.exists('../data/mask_coords.npy'):
     mask_coords = np.where(mask_img)
     np.save('../data/mask_coords.npy', mask_coords)
 else:
-    mask_coords = nib.load('../data/mask_coords.npy')
+    mask_coords = np.load('../data/mask_coords.npy')
 
 
 if not os.path.exists('../data/z_scored_data.npy'):  # only runs all this code if the data isn't in current directory
@@ -60,7 +60,7 @@ if not os.path.exists('../data/z_scored_data.npy'):  # only runs all this code i
     # Apply the brain mask using brainiak.image
     masked_imgs = mask_images(func_imgs, mask_img)
 
-    # Collate data into a single TR x voxel x subject array
+    # Collate data into a single TR isc_wholebrain voxel isc_wholebrain subject array
     data = MaskedMultiSubjectData.from_masked_images(masked_imgs, len(func_fns))
 
     print(f"Trimmed fMRI data shape: {data.shape} "
@@ -206,7 +206,7 @@ nib.save(isc_nii, isc_fn)
 
 """  # raw mean isc without stats
 
-if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz'):
+if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz') or True:
     # Run bootstrap hypothesis test on ISCs
     observed, ci, p, distribution = bootstrap_isc(iscs, pairwise=False,
                                                   ci_percentile=95,

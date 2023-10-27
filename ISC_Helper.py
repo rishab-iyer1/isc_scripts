@@ -127,7 +127,7 @@ def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
 
 def plot_spatial_isc(roi_selected: List[str]):
     """
-    Creates a timeseries plot of spatial correlation on the y-axis vs. TRs on the x-axis.
+    Creates a timeseries plot of spatial correlation on the y-axis vs. TRs on the isc_wholebrain-axis.
     Each ROI selected generates a new subplot in the image.
     :param roi_selected: list of all rois to compute ISC over
     :return: displays the plot
