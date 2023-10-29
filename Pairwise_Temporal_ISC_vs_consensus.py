@@ -155,7 +155,12 @@ if not os.path.exists(perm_vox_path):  # only compute if file DNE
         pickle.dump(perm_vox, f)
 else:
     with open(perm_vox_path, 'rb') as f:
+<<<<<<< HEAD
         perm_vox = pickle.load(f)
+
+=======
+        perm = pickle.load(f)
+>>>>>>> 8d0b75de31be7a62cbbb09e614692b4ed9fccf3a
 
 
 s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
