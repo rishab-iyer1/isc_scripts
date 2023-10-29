@@ -254,4 +254,3 @@ for e, emo in enumerate(emotions[:n_emo]):
 
 # create a p_map which contains the p-value of the s_map using the permutation tests
 # p_map = np.empty(shape=(s_map.shape[0]))
-# for voxel
