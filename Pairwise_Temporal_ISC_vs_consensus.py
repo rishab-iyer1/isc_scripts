@@ -119,26 +119,43 @@ df_consensus = np.mean(rolling_mean, axis=1)
 #                   f"{corrs_roi[roi].loc[emotions[emotion]]['p']:.3f}")
 
 
-n_perm = 100
+n_perm = 10000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
 n_emo = 3
 
 # loop through emotions pos, neg, mix, (skip neutral)
-perm = np.empty(shape=(n_emo, n_perm, isc_wholebrain.shape[1], 2))  # 3 emotions, n_perm, n_voxels, r and p
-perm_path = f"{data_path}/perm_{n_perm}.pkl"
-if not os.path.exists(perm_path):  # only compute if file DNE
+# perm = np.empty(shape=(n_emo, n_perm, isc_wholebrain.shape[1], 2))  # 3 emotions, n_perm, n_voxels, r and p
+# perm_path = f"{data_path}/perm_{n_perm}.pkl"
+# if not os.path.exists(perm_path):  # only compute if file DNE
+#     rng = np.random.default_rng()
+#     for e, emo in tqdm(enumerate(emotions[:n_emo])):
+#         for i in tqdm(range(n_perm)):  # number of permutations to loop over
+#             for j in range(isc_wholebrain.shape[1]):  # number of voxels
+#                 perm[e, i, j] = pearsonr(isc_wholebrain.T[j], rng.permutation(df_consensus[:, e]))
+#     # save perm to pickle
+#     with open(perm_path, 'wb') as f:
+#         pickle.dump(perm, f)
+# else:
+#     with open(perm_path, 'rb') as f:
+#         perm = pickle.load(f)
+
+# do permutations on just one voxel
+vox_idx = 1000
+emo = 2
+perm_vox = np.empty(shape=(n_perm, 2))
+perm_vox_path = f"{data_path}/perm_vox_{n_perm}.pkl"
+if not os.path.exists(perm_vox_path):  # only compute if file DNE
     rng = np.random.default_rng()
-    for e, emo in tqdm(enumerate(emotions[:n_emo])):
-        for i in tqdm(range(n_perm)):  # number of permutations to loop over
-            for j in range(isc_wholebrain.shape[1]):  # number of voxels
-                perm[e, i, j] = pearsonr(isc_wholebrain.T[j], rng.permutation(df_consensus[:, e]))
+    for i in tqdm(range(n_perm)):  # number of permutations to loop over
+        perm_vox[i] = pearsonr(isc_wholebrain.T[vox_idx], rng.permutation(df_consensus[:, emo]))
     # save perm to pickle
-    with open(perm_path, 'wb') as f:
-        pickle.dump(perm, f)
+    with open(perm_vox_path, 'wb') as f:
+        pickle.dump(perm_vox, f)
 else:
-    with open(perm_path, 'rb') as f:
+    with open(perm_vox_path, 'rb') as f:
         perm = pickle.load(f)
+
 
 s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
 if not os.path.exists(f"{data_path}/s_map.pkl"):
@@ -157,10 +174,10 @@ else:
         s_map = pickle.load(f)
 
 assert np.sum(s_map) > 0
-assert np.sum(perm) > 0
+assert np.sum(perm_vox) > 0
 
 # view histogram
-plt.hist(perm[0, :, 0, 0], bins=100)
+plt.hist(perm_vox[:, 0], bins=100)
 plt.title('Histogram of permuted correlations for pos emotion in one voxel')
 plt.show()
 
@@ -170,9 +187,11 @@ plt.show()
 # thresh = vox[-alpha]
 
 # now get a 95% threshold for each voxel using np argsort
-thresh = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], ))
-for voxel in range(perm.shape[1]):
-    thresh = perm[np.argsort(perm[:, :, voxel, 0], axis=0)[-alpha], voxel, 0]
+# thresh = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], ))
+# for voxel in range(perm_vox.shape[1]):
+#     thresh = perm_vox[np.argsort(perm_vox[:, :, voxel, 0], axis=0)[-alpha], voxel, 0]
+
+thresh = perm_vox[np.argsort(perm_vox[:, 0], axis=0)[-alpha], 0]
 
 mask_img = np.load(f"{data_path}/mask_img.npy")
 ref_nii = nib.load(f"{data_path}/ref_nii.nii.gz")
