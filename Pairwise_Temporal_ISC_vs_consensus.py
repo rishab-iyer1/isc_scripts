@@ -8,6 +8,7 @@ import pickle
 from glob import glob
 from os.path import join
 from tqdm import tqdm
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -154,7 +155,7 @@ if not os.path.exists(perm_vox_path):  # only compute if file DNE
         pickle.dump(perm_vox, f)
 else:
     with open(perm_vox_path, 'rb') as f:
-        perm = pickle.load(f)
+        perm_vox = pickle.load(f)
 
 
 s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
@@ -197,13 +198,15 @@ mask_img = np.load(f"{data_path}/mask_img.npy")
 ref_nii = nib.load(f"{data_path}/ref_nii.nii.gz")
 
 
-def plot_brain_from_np(ref, mask, data, data_name):
+def plot_brain_from_np(ref, mask, data, data_name, num_perm, plot=False):
     """
     Given a reference nifti file, a mask, and an isc map, plot the isc map on the reference brain
     :param ref: reference nifti file
     :param mask: mask image
     :param data: vectorized brain data
-    :param data_name: filename to save
+    :param data_name: filename to save, in format {data_name}_{num_perm}
+    :param num_perm: number of permutations (used in filename)
+    :param plot: whether to display a few slices of the brain
     :return:
     """
     from nilearn.plotting import plot_stat_map
@@ -212,33 +215,42 @@ def plot_brain_from_np(ref, mask, data, data_name):
     isc_img = np.full(ref.shape, np.nan)
     isc_img[mask_coords] = data
     isc_nii = nib.Nifti1Image(isc_img, ref.affine, ref.header)
-    nib.save(isc_nii, f'{data_path}/{data_name}_{n_perm}')
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        cut_coords=(-61, -20, 8))
+    nib.save(isc_nii, f'{data_path}/{data_name}_{num_perm}')
+    if plot:
+        plot_stat_map(
+            isc_nii,
+            cmap='RdYlBu_r',
+            cut_coords=(-61, -20, 8))
 
-    # Plot slices at coordinates 0, -65, 40
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        cut_coords=(0, -65, 40))
-    plt.show()
+        # Plot slices at coordinates 0, -65, 40
+        plot_stat_map(
+            isc_nii,
+            cmap='RdYlBu_r',
+            cut_coords=(0, -65, 40))
+        plt.show()
 
-    # Plot slices at coordinates -61, -20, 8
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        cut_coords=(-61, -20, 8))
+        # Plot slices at coordinates -61, -20, 8
+        plot_stat_map(
+            isc_nii,
+            cmap='RdYlBu_r',
+            cut_coords=(-61, -20, 8))
 
-    # Plot slices at coordinates 0, -65, 40
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        cut_coords=(0, -65, 40))
+        # Plot slices at coordinates 0, -65, 40
+        plot_stat_map(
+            isc_nii,
+            cmap='RdYlBu_r',
+            cut_coords=(0, -65, 40))
 
 
-plot_brain_from_np(ref_nii, mask_img, s_map[:, 0], 's_map')
+# plot the s_map for each emotion
+for e, emo in enumerate(emotions[:n_emo]):
+    plot_brain_from_np(ref_nii, mask_img, s_map[e, :, 0], f's_map_{emo}', n_perm)
+
+# plot the thresholded s_map for each emotion
+for e, emo in enumerate(emotions[:n_emo]):
+    thresh_s_map = deepcopy(s_map[e, :, 0])
+    thresh_s_map[thresh_s_map < thresh] = 0
+    plot_brain_from_np(ref_nii, mask_img, thresh_s_map, f'thresh_s_map_{emo}', n_perm)
 
 # create a p_map which contains the p-value of the s_map using the permutation tests
 # p_map = np.empty(shape=(s_map.shape[0]))
