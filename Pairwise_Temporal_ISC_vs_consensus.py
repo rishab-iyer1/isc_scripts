@@ -155,13 +155,7 @@ if not os.path.exists(perm_vox_path):  # only compute if file DNE
         pickle.dump(perm_vox, f)
 else:
     with open(perm_vox_path, 'rb') as f:
-<<<<<<< HEAD
         perm_vox = pickle.load(f)
-
-=======
-        perm = pickle.load(f)
->>>>>>> 8d0b75de31be7a62cbbb09e614692b4ed9fccf3a
-
 
 s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
 if not os.path.exists(f"{data_path}/s_map.pkl"):
@@ -251,11 +245,25 @@ def plot_brain_from_np(ref, mask, data, data_name, num_perm, plot=False):
 for e, emo in enumerate(emotions[:n_emo]):
     plot_brain_from_np(ref_nii, mask_img, s_map[e, :, 0], f's_map_{emo}', n_perm)
 
-# plot the thresholded s_map for each emotion
+# the p-value is the proportion of permuted correlations that are greater than the observed correlation
+p_map = np.empty(shape=(s_map.shape[:2]))
 for e, emo in enumerate(emotions[:n_emo]):
-    thresh_s_map = deepcopy(s_map[e, :, 0])
-    thresh_s_map[thresh_s_map < thresh] = 0
-    plot_brain_from_np(ref_nii, mask_img, thresh_s_map, f'thresh_s_map_{emo}', n_perm)
+    for voxel in range(s_map.shape[1]):
+        p_map[e, voxel] = np.sum(s_map[e, voxel, 0] >= perm_vox[:, 0]) / n_perm
 
-# create a p_map which contains the p-value of the s_map using the permutation tests
-# p_map = np.empty(shape=(s_map.shape[0]))
+p_map[p_map == 0] += 1e-8
+p_map[p_map == 1] -= 1e-8
+
+# convert to z map
+z_map = norm.ppf(1 - (p_map / 2))
+
+# use nilearn.glm.fdr_threshold to get a thresholded map
+thresh = np.empty(shape=z_map.shape[0])
+for e, emo in enumerate(emotions[:n_emo]):
+    thresh[e] = fdr_threshold(z_map[e], alpha=0.05)
+
+# plot the thresholded s_map for each emotion
+thresh_s_map = deepcopy(s_map[:, :, 0])
+for e, emo in enumerate(emotions[:n_emo]):
+    thresh_s_map[e, z_map[e] < thresh[e]] = 0
+    plot_brain_from_np(ref_nii, mask_img, thresh_s_map[e], f'thresh_s_map_{emo}', n_perm)
