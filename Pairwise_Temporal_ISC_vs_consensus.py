@@ -71,16 +71,19 @@ for i, (s1, s2) in enumerate(itertools.combinations(subj_ids, 2)):
 # -------------------------------
 df = xr.open_dataset(rating_path)
 df = df.sel(subj_id=subj_ids)  # subset df with only the subjects we have ISC for
-n_pairs = math.comb(df.shape[1], 2)
+n_pairs = math.comb(df.dims['subj_id'], 2)
 
 
-df_agree_by_emotion = np.empty(shape=(n_pairs, df.shape[0], len(emotions)))
-for idx, (col_a, col_b) in enumerate(itertools.combinations(df.columns, 2)):
-    for t in range(df.shape[0]):
-        for e in range(len(emotions)):
-            df_agree_by_emotion[idx, t, e] = int(df[col_a][t] == df[col_b][t] == emotions[e])  # at each time point
+# df_agree_by_emotion = np.empty(shape=(n_pairs, df.dims['TR'], len(emotions)))
+# for idx, (col_a, col_b) in enumerate(itertools.combinations(df.columns, 2)):
+#     for t in range(df.shape[0]):
+#         for e in range(len(emotions)):
+#             df_agree_by_emotion[idx, t, e] = int(df[col_a][t] == df[col_b][t] == emotions[e])  # at each time point
 
-
+df_consensus = np.empty(shape=(n_pairs, 5))
+for i, (s1, s2) in enumerate(subj_mapping):
+    for j, emo in enumerate(emotions[5:]):
+        df_consensus[]
 n_perm = 10000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
