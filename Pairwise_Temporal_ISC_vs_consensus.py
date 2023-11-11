@@ -71,23 +71,24 @@ for i, (s1, s2) in enumerate(itertools.combinations(subj_ids, 2)):
 # -------------------------------
 df = xr.open_dataset(rating_path)
 df = df.sel(subj_id=subj_ids)  # subset df with only the subjects we have ISC for
-n_pairs = math.comb(df.dims['subj_id'], 2)
 
-
+n_emo = 5
 # df_agree_by_emotion = np.empty(shape=(n_pairs, df.dims['TR'], len(emotions)))
 # for idx, (col_a, col_b) in enumerate(itertools.combinations(df.columns, 2)):
 #     for t in range(df.shape[0]):
 #         for e in range(len(emotions)):
 #             df_agree_by_emotion[idx, t, e] = int(df[col_a][t] == df[col_b][t] == emotions[e])  # at each time point
-
-df_consensus = np.empty(shape=(n_pairs, 5))
+df_emotions = ['P', 'N', 'M', 'X', 'Cry', 'P_smooth', 'N_smooth', 'M_smooth', 'X_smooth', 'Cry_smooth']
+df_consensus = np.empty(shape=(len(subj_mapping), 5))
 for i, (s1, s2) in enumerate(subj_mapping):
-    for j, emo in enumerate(emotions[5:]):
-        df_consensus[]
-n_perm = 10000
+    for j, emo in enumerate(df_emotions[5:]):
+        df_consensus[i, j] = pearsonr(df.sel(subj_id=s1, emotion=emo).to_array()[0, :],
+                                      df.sel(subj_id=s2, emotion=emo).to_array()[0, :])[0]
+# list the number of nans in each column
+print(np.sum(np.isnan(df_consensus), axis=0))
+n_perm = 100
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
-n_emo = 3
 
 # loop through emotions pos, neg, mix, (skip neutral)
 # perm = np.empty(shape=(n_emo, n_perm, isc_wholebrain.shape[1], 2))  # 3 emotions, n_perm, n_voxels, r and p
@@ -113,7 +114,8 @@ perm_vox_path = f"{data_path}/perm_vox_{n_perm}.pkl"
 if not os.path.exists(perm_vox_path):  # only compute if file DNE
     rng = np.random.default_rng()
     for i in tqdm(range(n_perm)):  # number of permutations to loop over
-        perm_vox[i] = pearsonr(isc_wholebrain.T[vox_idx], rng.permutation(df_consensus[:, emo]))
+        if np.sum(np.isnan(df_consensus[:, emo])) == 0:  # if no nans in the column
+            perm_vox[i] = pearsonr(isc_wholebrain.T[vox_idx], rng.permutation(df_consensus[:, emo]))
     # save perm to pickle
     with open(perm_vox_path, 'wb') as f:
         pickle.dump(perm_vox, f)
@@ -125,7 +127,7 @@ s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
 if not os.path.exists(f"{data_path}/s_map.pkl"):
     # do the correlation voxelwise, ISC vs consensus
     print('computing s_map')
-    for e, emo in tqdm(enumerate(emotions[:n_emo])):
+    for e, emo in tqdm(enumerate(df_emotions[n_emo:])):
         for i in range(isc_wholebrain.shape[1]):
             s_map[e, i] = pearsonr(isc_wholebrain.T[i], df_consensus[:, e])
 
