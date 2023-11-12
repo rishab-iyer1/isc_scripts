@@ -2,21 +2,19 @@
 This script computes pairwise temporal ISC for a set of ROIs and compares it to pairwise behavioral ratings.
 """
 import itertools
-import math
 import os
 import pickle
+from copy import deepcopy
 from glob import glob
 from os.path import join
-from tqdm import tqdm
-from copy import deepcopy
 
-import numpy as np
-import pandas as pd
-import xarray as xr
-from scipy.stats import pearsonr, norm
 import matplotlib.pyplot as plt
 import nibabel as nib
+import numpy as np
+import xarray as xr
 from nilearn.glm import fdr_threshold
+from scipy.stats import pearsonr, norm
+from tqdm import tqdm
 
 from ISC_Helper import compute_isc, get_rois
 
@@ -86,7 +84,7 @@ for i, (s1, s2) in enumerate(subj_mapping):
                                       df.sel(subj_id=s2, emotion=emo).to_array()[0, :])[0]
 # list the number of nans in each column
 print(np.sum(np.isnan(df_consensus), axis=0))
-n_perm = 10000
+n_perm = 1000000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
 
