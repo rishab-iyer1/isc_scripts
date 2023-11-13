@@ -38,7 +38,7 @@ subj_ids.sort()
 roi_selected = ['auditory', 'ACC', 'vmPFC', 'insula', 'visualcortex', 'amygdala', 'wholebrain']  # ['auditory',
 # 'visualcortex', 'ACC', 'vmPFC', 'vPCUN', 'aINS_L', 'aANG_L', 'pANG_L', 'Insular_R', 'dPCUN', 'aANG_R', 'aCUN',
 # 'pANG_R', 'PMC_L', 'dPCC', 'insula', 'amygdala', 'wholebrain']
-emotions = ['P', 'N', 'M', 'X']
+emotions = ['P', 'N', 'M', 'X', 'Cry']
 spatial = False
 pairwise = True
 
@@ -84,7 +84,7 @@ for i, (s1, s2) in enumerate(subj_mapping):
                                       df.sel(subj_id=s2, emotion=emo).to_array()[0, :])[0]
 # list the number of nans in each column
 print(np.sum(np.isnan(df_consensus), axis=0))
-n_perm = 1000000
+n_perm = 100000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
 
