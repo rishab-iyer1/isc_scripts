@@ -129,6 +129,10 @@ plt.hist(perm_vox[0, :, 0], bins=100)
 plt.title('Histogram of permuted correlations for pos emotion in one voxel')
 plt.show()
 
+# print critical values for each emotion based on permutation testing
+for e in range(5):
+    print(f"Critical value for {df_emotions[e+5]} at p=0.001: {np.sort(perm_vox[e, :, 0])[-10]:.3f}")
+
 s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
 if not os.path.exists(f"{data_path}/s_map.pkl"):
     # do the correlation voxelwise, ISC vs consensus
@@ -216,13 +220,21 @@ for e, emo in enumerate(emotions[:n_emo]):
 p_map = np.empty(shape=(s_map.shape[:2]))
 for e, emo in enumerate(emotions[:n_emo]):
     for voxel in range(s_map.shape[1]):
-        p_map[e, voxel] = np.sum(s_map[e, voxel, 0] >= perm_vox[:, 0]) / n_perm
+        p_map[e, voxel] = np.sum(s_map[e, voxel, 0] <= np.abs(perm_vox[e, :, 0])) / n_perm
+
+# plot the p_map for each emotion
+for e, emo in enumerate(emotions[:n_emo]):
+    plot_brain_from_np(ref_nii, mask_img, p_map[e], f'p_map_{emo}', n_perm)
 
 p_map[p_map == 0] += 1e-8  # to avoid log(0)
 p_map[p_map == 1] -= 1e-8  # to avoid log(0)
 
 # convert to z map
 z_map = norm.ppf(1 - (p_map / 2))
+
+# plot the z_map for each emotion
+for e, emo in enumerate(emotions[:n_emo]):
+    plot_brain_from_np(ref_nii, mask_img, z_map[e], f'z_map_{emo}', n_perm)
 
 # use nilearn.glm.fdr_threshold to get a thresholded map
 thresh = np.empty(shape=z_map.shape[0])
