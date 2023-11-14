@@ -84,7 +84,7 @@ for i, (s1, s2) in enumerate(subj_mapping):
                                       df.sel(subj_id=s2, emotion=emo).to_array()[0, :])[0]
 # list the number of nans in each column
 print(np.sum(np.isnan(df_consensus), axis=0))
-n_perm = 100000
+n_perm = 1000000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
 
@@ -125,9 +125,9 @@ else:
         perm_vox = pickle.load(f)
 
 # view histogram
-plt.hist(perm_vox[0, :, 0], bins=100)
-plt.title('Histogram of permuted correlations for pos emotion in one voxel')
-plt.show()
+# plt.hist(perm_vox[0, :, 0], bins=100)
+# plt.title('Histogram of permuted correlations for pos emotion in one voxel')
+# plt.show()
 
 # print critical values for each emotion based on permutation testing
 for e in range(5):
