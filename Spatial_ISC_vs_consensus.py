@@ -8,13 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 isc_path = '/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/data/iscs_roi_dict.pkl'
+fig_path = '/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/figures'
 
 if os.path.exists(isc_path):
     with open(isc_path, 'rb') as f:
         iscs_roi_selected = pickle.load(f)
 
     # compute percentage agreement for each TR (this block modified from Anthony's feeling_trend.py)
-    df = pd.read_excel('/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Label_Aggregate.xlsx')
+    df = pd.read_excel('/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Label_Aggregate.xlsx', skiprows=1)
     # needs openpyxl
 
     # Compute the percentage of subjects in each state at each time point
@@ -79,7 +80,7 @@ if os.path.exists(isc_path):
         plt.plot(P_percentage, m[0] * P_percentage + m[1], label=f'r={sig_pos[roi][0]:.3f}, p={sig_pos[roi][1]:.3f}')
         plt.legend()
         plt.title(f'{roi} ISC vs. positive state')
-        plt.savefig(f'figures/{roi}_ISC_vs_positive_state.png')
+        plt.savefig(f'{fig_path}/{roi}_ISC_vs_positive_state.png')
 
     for roi in sig_neg.keys():
         plt.figure()
@@ -90,7 +91,7 @@ if os.path.exists(isc_path):
         plt.plot(N_percentage, m[0] * N_percentage + m[1], label=f'r={sig_neg[roi][0]:.3f}, p={sig_neg[roi][1]:.3f}')
         plt.legend()
         plt.title(f'{roi} ISC vs. negative state')
-        plt.savefig(f'figures/{roi}_ISC_vs_negative_state.png')
+        plt.savefig(f'{fig_path}/{roi}_ISC_vs_negative_state.png')
 
     for roi in sig_mix.keys():
         plt.figure()
@@ -101,7 +102,7 @@ if os.path.exists(isc_path):
         plt.plot(M_percentage, m[0] * M_percentage + m[1], label=f'r={sig_mix[roi][0]:.3f}, p={sig_mix[roi][1]:.3f}')
         plt.legend()
         plt.title(f'{roi} ISC vs. mixed state')
-        plt.savefig(f'figures/{roi}_ISC_vs_mixed_state.png')
+        plt.savefig(f'{fig_path}/{roi}_ISC_vs_mixed_state.png')
 
     for roi in sig_neu.keys():
         plt.figure()
@@ -112,7 +113,7 @@ if os.path.exists(isc_path):
         plt.plot(X_percentage, m[0] * X_percentage + m[1], label=f'r={sig_neu[roi][0]:.3f}, p={sig_neu[roi][1]:.3f}')
         plt.legend()
         plt.title(f'{roi} ISC vs. neutral state')
-        plt.savefig(f'figures/{roi}_ISC_vs_neutral_state.png')
+        plt.savefig(f'{fig_path}/{roi}_ISC_vs_neutral_state.png')
 
 else:
     print('ISC data is not in this directory.')
