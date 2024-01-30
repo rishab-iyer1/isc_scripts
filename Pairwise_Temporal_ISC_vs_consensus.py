@@ -71,11 +71,6 @@ df = xr.open_dataset(rating_path)
 df = df.sel(subj_id=subj_ids)  # subset df with only the subjects we have ISC for
 
 n_emo = 5
-# df_agree_by_emotion = np.empty(shape=(n_pairs, df.dims['TR'], len(emotions)))
-# for idx, (col_a, col_b) in enumerate(itertools.combinations(df.columns, 2)):
-#     for t in range(df.shape[0]):
-#         for e in range(len(emotions)):
-#             df_agree_by_emotion[idx, t, e] = int(df[col_a][t] == df[col_b][t] == emotions[e])  # at each time point
 df_emotions = ['P', 'N', 'M', 'X', 'Cry', 'P_smooth', 'N_smooth', 'M_smooth', 'X_smooth', 'Cry_smooth']
 df_consensus = np.empty(shape=(len(subj_mapping), 5))
 for i, (s1, s2) in enumerate(subj_mapping):
@@ -87,22 +82,6 @@ print(np.sum(np.isnan(df_consensus), axis=0))
 n_perm = 1000000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
-
-# loop through emotions pos, neg, mix, (skip neutral)
-# perm = np.empty(shape=(n_emo, n_perm, isc_wholebrain.shape[1], 2))  # 3 emotions, n_perm, n_voxels, r and p
-# perm_path = f"{data_path}/perm_{n_perm}.pkl"
-# if not os.path.exists(perm_path):  # only compute if file DNE
-#     rng = np.random.default_rng()
-#     for e, emo in tqdm(enumerate(emotions[:n_emo])):
-#         for i in tqdm(range(n_perm)):  # number of permutations to loop over
-#             for j in range(isc_wholebrain.shape[1]):  # number of voxels
-#                 perm[e, i, j] = pearsonr(isc_wholebrain.T[j], rng.permutation(df_consensus[:, e]))
-#     # save perm to pickle
-#     with open(perm_path, 'wb') as f:
-#         pickle.dump(perm, f)
-# else:
-#     with open(perm_path, 'rb') as f:
-#         perm = pickle.load(f)
 
 # do permutations on just one voxel
 # run permutation testing for the brain to consensus correlation to test null hypothesis that there is no correlation
@@ -125,13 +104,13 @@ else:
         perm_vox = pickle.load(f)
 
 # view histogram
-# plt.hist(perm_vox[0, :, 0], bins=100)
-# plt.title('Histogram of permuted correlations for pos emotion in one voxel')
-# plt.show()
+plt.hist(perm_vox[4, :, 0], bins=100)
+plt.title('Histogram of permuted correlations for cry emotion in one voxel')
+plt.show()
 
 # print critical values for each emotion based on permutation testing
 for e in range(5):
-    print(f"Critical value for {df_emotions[e+5]} at p=0.001: {np.sort(perm_vox[e, :, 0])[-10]:.3f}")
+    print(f"Critical value for {df_emotions[e+5]} at p=0.05: {np.sort(perm_vox[e, :, 0])[-500]:.3f}")
 
 s_map = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], 2))
 if not os.path.exists(f"{data_path}/s_map.pkl"):
@@ -148,21 +127,6 @@ if not os.path.exists(f"{data_path}/s_map.pkl"):
 else:
     with open(f"{data_path}/s_map.pkl", 'rb') as f:
         s_map = pickle.load(f)
-
-# assert np.sum(s_map, axis=[s_map.dims]) > 0
-# assert np.sum(perm_vox) > 0
-
-# get the 95% confidence threshold based on permutation tests
-# vox = perm[:, :, 0, 0].deepcopy()
-# vox.sort()
-# thresh = vox[-alpha]
-
-# now get a 95% threshold for each voxel using np argsort
-# thresh = np.empty(shape=(n_emo, iscs_roi_selected['wholebrain'].shape[1], ))
-# for voxel in range(perm_vox.shape[1]):
-#     thresh = perm_vox[np.argsort(perm_vox[:, :, voxel, 0], axis=0)[-alpha], voxel, 0]
-
-# thresh = perm_vox[np.argsort(perm_vox[:, 0], axis=0)[-alpha], 0]
 
 mask_img = np.load(f"{data_path}/mask_img.npy")
 ref_nii = nib.load(f"{data_path}/ref_nii.nii.gz")
@@ -213,36 +177,36 @@ def plot_brain_from_np(ref, mask, data, data_name, num_perm, plot=False):
 
 
 # plot the s_map for each emotion
-for e, emo in enumerate(emotions[:n_emo]):
-    plot_brain_from_np(ref_nii, mask_img, s_map[e, :, 0], f's_map_{emo}', n_perm)
+# for e, emo in enumerate(emotions[:n_emo]):
+#     plot_brain_from_np(ref_nii, mask_img, s_map[e, :, 0], f's_map_{emo}', n_perm)
 
-# the p-value is the proportion of permuted correlations that are greater than the observed correlation
+# the p-value is the proportion of permuted correlations that are more extreme than the observed correlation
 p_map = np.empty(shape=(s_map.shape[:2]))
-for e, emo in enumerate(emotions[:n_emo]):
-    for voxel in range(s_map.shape[1]):
-        p_map[e, voxel] = np.sum(s_map[e, voxel, 0] <= np.abs(perm_vox[e, :, 0])) / n_perm
+if not os.path.exists(f"{data_path}/p_map_{n_perm}.pkl"):
+    print('computing p_map')
+    for e, emo in tqdm(enumerate(emotions[:n_emo])):
+        for voxel in range(s_map.shape[1]):
+            if s_map[e, voxel, 0] < 0:
+                p_map[e, voxel] = np.sum(s_map[e, voxel, 0] > perm_vox[e, :, 0]) / n_perm
+            else:
+                p_map[e, voxel] = np.sum(s_map[e, voxel, 0] < perm_vox[e, :, 0]) / n_perm
+        # save p_map to pickle
+    with open(f"{data_path}/p_map_{n_perm}.pkl", 'wb') as f:
+        pickle.dump(p_map, f)
+else:
+    for e, emo in tqdm(enumerate(emotions[:n_emo])):
+        with open(f"{data_path}/p_map_{n_perm}.pkl", 'rb') as f:
+            p_map = pickle.load(f)
 
-# plot the p_map for each emotion
-for e, emo in enumerate(emotions[:n_emo]):
-    plot_brain_from_np(ref_nii, mask_img, p_map[e], f'p_map_{emo}', n_perm)
-
-p_map[p_map == 0] += 1e-8  # to avoid log(0)
-p_map[p_map == 1] -= 1e-8  # to avoid log(0)
-
-# convert to z map
-z_map = norm.ppf(1 - (p_map / 2))
-
-# plot the z_map for each emotion
-for e, emo in enumerate(emotions[:n_emo]):
-    plot_brain_from_np(ref_nii, mask_img, z_map[e], f'z_map_{emo}', n_perm)
-
-# use nilearn.glm.fdr_threshold to get a thresholded map
-thresh = np.empty(shape=z_map.shape[0])
-for e, emo in enumerate(emotions[:n_emo]):
-    thresh[e] = fdr_threshold(z_map[e], alpha=0.05)
-
-# plot the thresholded s_map for each emotion
+# calculate and save the z_map for each emotion
 thresh_s_map = deepcopy(s_map[:, :, 0])
 for e, emo in enumerate(emotions[:n_emo]):
-    thresh_s_map[e, z_map[e] < thresh[e]] = 0
+    z_map = norm.ppf(1 - p_map / 2)
+    q = fdr_threshold(z_map[e], 0.05)
+    q_p = 2*(1-norm.cdf(q))  # p-threshold corresponding to q
+
+    # threshold the s_map using the fdr q value
+    thresh = p_map >= q_p
+    thresh_s_map[thresh] = 0
+    # plot the thresholded s_map for each emotion
     plot_brain_from_np(ref_nii, mask_img, thresh_s_map[e], f'thresh_s_map_{emo}', n_perm)
