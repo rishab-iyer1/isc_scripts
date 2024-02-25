@@ -83,25 +83,38 @@ n_perm = 1000000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
 
-# do permutations on just one voxel
-# run permutation testing for the brain to consensus correlation to test null hypothesis that there is no correlation
-# between one voxel and correlation of behavioral ratings
-vox_idx = 1000  # pick just one voxel to do permutations on
-perm_vox = np.empty(shape=(df_consensus.shape[1], n_perm, 2))  # number of emotions, n_perm, r and p
-perm_vox_path = f"{data_path}/perm_vox_{n_perm}.pkl"  # path to save
-if not os.path.exists(perm_vox_path):  # only compute if file DNE
-    rng = np.random.default_rng()  # for rng.permutation
-    for e in tqdm(range(df_consensus.shape[1])):  # number of emotions
-        for i in tqdm(range(n_perm)):  # number of permutations
-            nan_mask = ~np.isnan(df_consensus[:, e])  # mask to ignore nans for any given pair
-            perm_vox[e, i] = pearsonr(isc_wholebrain.T[vox_idx][nan_mask],
-                                      rng.permutation(df_consensus[:, e][nan_mask]))
-    # save perm to pickle
-    with open(perm_vox_path, 'wb') as f:
-        pickle.dump(perm_vox, f)
-else:
-    with open(perm_vox_path, 'rb') as f:
-        perm_vox = pickle.load(f)
+
+def permute_isc_behav(isc: np.ndarray, behav: np.ndarray, num_perms: int, voxel_idx: int, perm_path: str):
+    """
+    Perform permutation testing comparing intersubject correlation (ISC) with some behavioral measure to test the null
+    hypothesis that there is no correlation between ISC at a given voxel and the behavioral measure. Shuffles the
+    behavioral report and computes the correlation between the shuffled report and the ISC. This is done many times
+    to create a null distribution of correlations. The p-value is then computed as the proportion of the null
+    distribution that is greater than the observed correlation.
+
+    :param isc: ISC data
+    :param behav: behavioral data
+    :param num_perms: number of permutations
+    :param voxel_idx: permutations are done on a single voxel assuming the null distribution is the same for all voxels
+    :return: saves the permutation results to a pickle file
+    """
+    vox_idx = voxel_idx  # pick just one voxel to do permutations on
+    perm_vox = np.empty(shape=(behav.shape[1], num_perms, 2))  # number of emotions, n_perm, r and p
+    if not os.path.exists(perm_path):  # only compute if file DNE
+        rng = np.random.default_rng()  # for rng.permutation
+        for e in tqdm(range(df_consensus.shape[1])):  # number of emotions
+            for i in tqdm(range(n_perm)):  # number of permutations
+                nan_mask = ~np.isnan(df_consensus[:, e])  # mask to ignore nans for any given pair
+                perm_vox[e, i] = pearsonr(isc.T[vox_idx][nan_mask],
+                                          rng.permutation(df_consensus[:, e][nan_mask]))
+        # save perm to pickle
+        with open(perm_path, 'wb') as f:
+            pickle.dump(perm_vox, f)
+    else:
+        with open(perm_path, 'rb') as f:
+            perm_vox = pickle.load(f)
+
+perm_vox = permute_isc_behav(isc_wholebrain, df_consensus, n_perm, 1000, f"{data_path}/perm_vox_{n_perm}.pkl")
 
 # view histogram
 plt.hist(perm_vox[4, :, 0], bins=100)
@@ -200,13 +213,13 @@ else:
 
 # calculate and save the z_map for each emotion
 thresh_s_map = deepcopy(s_map[:, :, 0])
+z_map = norm.ppf(1 - p_map / 2)
 for e, emo in enumerate(emotions[:n_emo]):
-    z_map = norm.ppf(1 - p_map / 2)
-    q = fdr_threshold(z_map[e], 0.05)
+    q = fdr_threshold(z_map[e], 0.01)
     q_p = 2*(1-norm.cdf(q))  # p-threshold corresponding to q
 
     # threshold the s_map using the fdr q value
-    thresh = p_map >= q_p
-    thresh_s_map[thresh] = 0
+    thresh = p_map[e] >= q_p
+    thresh_s_map[e, thresh] = 0
     # plot the thresholded s_map for each emotion
-    plot_brain_from_np(ref_nii, mask_img, thresh_s_map[e], f'thresh_s_map_{emo}', n_perm)
+    plot_brain_from_np(ref_nii, mask_img, thresh_s_map[e], f'thresh_s_map_{emo}_q_01', n_perm)
