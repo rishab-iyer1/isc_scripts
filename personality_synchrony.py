@@ -13,7 +13,7 @@ cry = df['Did you cry during either video? If so, at what point in the videos an
          'specific as possible as to when you began crying.']
 df = df[['I see myself as: - Extraverted, enthusiastic.', 'I see myself as: - Critical, quarrelsome.',
          'I see myself as: - Dependable, self-disciplined.', 'I see myself as: - Anxious, easily upset.',
-         'I see myself as: - Open to new experiences, complex', 'I see myself as: - Reserved, quiet',
+         'I see myself a s: - Open to new experiences, complex', 'I see myself as: - Reserved, quiet',
          'I see myself as: - Sympathetic, warm', 'I see myself as: - Disorganized, careless',
          'I see myself as: - Calm, emotionally stable', 'I see myself as: - Conventional, uncreative']]
 
