@@ -12,14 +12,17 @@ Rishab Iyer, rsiyer@usc.edu
 import os
 import pickle
 from typing import Dict, List
+from tqdm import tqdm
 
-import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
-# import seaborn as sns
 from nilearn.maskers import NiftiMasker
+from scipy.stats import pearsonr
 
 from isc_standalone import (isc)
+
+# import matplotlib.pyplot as plt
+# import seaborn as sns
 
 
 def get_rois(all_roi_fpaths) -> Dict[str, NiftiMasker]:
@@ -49,36 +52,15 @@ def get_rois(all_roi_fpaths) -> Dict[str, NiftiMasker]:
 
 def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: List[str], data_path: str) -> np.ndarray:
     """
-    Loads BOLD data with a single ROI mask
+    Loads BOLD data with a single ROI mask. Will create a folder within data_path to save the masked data, and if it
+    already exists, will use the existing files to speed the computations up.
     :param roi: name of the ROI to be loaded
     :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
     :param func_fns: file names of all functional data
     :param data_path: path to save the masked functional data for each subject
     :return: the functional file masked with the specified ROI
     """
-    # all_task_names = ['onesmallstep']
-    # n_subjs = {}
-    # for task_name in all_task_names:
-    #     n_subjs[task_name] = len(func_fns)
-    #
-    #
-    # def load_roi_data(roi_name):
-    #     # Pick a roi masker
-    #     roi_masker = all_roi_masker[roi_name]
-    #
-    #     # Preallocate
-    #     bold_roi = {task_name: [] for i, task_name in enumerate(all_task_names)}
-    #
-    #     # Gather data
-    #     for task_name in all_task_names:
-    #         for subj_id in range(n_subjs[task_name]):
-    #             # Get the data for task t, subject s
-    #             nii_t_s = nib.load(func_fns[subj_id])
-    #             bold_roi[task_name].append(roi_masker.fit_transform(nii_t_s))
-    #
-    #         # Reformat the data to std form
-    #         bold_roi[task_name] = np.transpose(np.array(bold_roi[task_name]), [1, 2, 0])
-    #     return bold_roi
+
     subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]
     # Pick an roi masker
     roi_masker = all_roi_masker[roi]
@@ -102,13 +84,14 @@ def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: Li
     return bold_roi
 
 
-def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns,
+def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, data_path: str,
                 spatial=False, pairwise=False, summary_statistic=None, tolerate_nans=True):
     """
     Given functional data of shape (n_TRs, n_voxels, n_subjects), computes ISC for the selected ROIs.
     :param roi_selected: list of all rois to compute ISC over
     :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
     :param func_fns: file names of all functional data
+    :param data_path: path to save the masked functional data for each subject
     :param spatial: Whether to compute spatial ISC (default: temporal)
     :param pairwise: Whether to compute pairwise ISC (default: group)
     :param summary_statistic: Which summary statistic to use: mean or median (default: None)
@@ -121,7 +104,7 @@ def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
         print(j, roi_name)
 
         # Load data
-        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns)
+        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns, data_path=data_path)
 
         if spatial:
             bold_roi = np.transpose(bold_roi, [1, 0, 2])  # becomes (n_voxels, n_TRs, n_subjects)
@@ -132,40 +115,40 @@ def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
     return iscs_roi_selected
 
 
-def plot_spatial_isc(roi_selected: List[str]):
-    """
-    Creates a timeseries plot of spatial correlation on the y-axis vs. TRs on the isc_wholebrain-axis.
-    Each ROI selected generates a new subplot in the image.
-    :param roi_selected: list of all rois to compute ISC over
-    :return: displays the plot
-    """
-    with open('../data/iscs_roi_dict.pkl', 'r') as f:
-        iscs_roi_selected = pickle.load(f)
-    # Plot the spatial ISC over time
-    col_pal = sns.color_palette(palette='colorblind')
-    ci = 95
-
-    fig, axes = plt.subplots(len(roi_selected), 1, figsize=(14, 5 * len(roi_selected)))
-
-    # For each ROI
-    for j, roi_name in enumerate(roi_selected):
-        # For each task
-        sns.tsplot(
-            iscs_roi_selected[roi_name],
-            color=col_pal, ci=ci,
-            ax=axes[j]
-        )
-        sns.despine()
-
-    # Label the plot
-    for j, roi_name in enumerate(roi_selected):
-        axes[j].axhline(0, color='black', linestyle='--', alpha=.3)
-        axes[j].set_ylabel('Linear correlation')
-        axes[j].set_title('Spatial inter-subject correlation, {}'.format(roi_selected[j]))
-
-    axes[-1].set_xlabel('TRs')
-
-    plt.show()
+# def plot_spatial_isc(roi_selected: List[str]):
+#     """
+#     Creates a timeseries plot of spatial correlation on the y-axis vs. TRs on the isc_wholebrain-axis.
+#     Each ROI selected generates a new subplot in the image.
+#     :param roi_selected: list of all rois to compute ISC over
+#     :return: displays the plot
+#     """
+#     with open('../data/iscs_roi_dict.pkl', 'r') as f:
+#         iscs_roi_selected = pickle.load(f)
+#     # Plot the spatial ISC over time
+#     col_pal = sns.color_palette(palette='colorblind')
+#     ci = 95
+#
+#     fig, axes = plt.subplots(len(roi_selected), 1, figsize=(14, 5 * len(roi_selected)))
+#
+#     # For each ROI
+#     for j, roi_name in enumerate(roi_selected):
+#         # For each task
+#         sns.tsplot(
+#             iscs_roi_selected[roi_name],
+#             color=col_pal, ci=ci,
+#             ax=axes[j]
+#         )
+#         sns.despine()
+#
+#     # Label the plot
+#     for j, roi_name in enumerate(roi_selected):
+#         axes[j].axhline(0, color='black', linestyle='--', alpha=.3)
+#         axes[j].set_ylabel('Linear correlation')
+#         axes[j].set_title('Spatial inter-subject correlation, {}'.format(roi_selected[j]))
+#
+#     axes[-1].set_xlabel('TRs')
+#
+#     plt.show()
 
 
 def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, data_path: str,
@@ -186,8 +169,6 @@ def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
     :param step_size: number of TRs to move the window by
     :return: iscs_roi_selected: a dictionary with roi name (keys) mapped to isc values (values)
     """
-
-    from tqdm import tqdm
 
     # compute ISC for all ROIs
     n_windows = int((n_trs - window_size) / step_size) + 1
@@ -211,3 +192,37 @@ def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
 
     return iscs_roi_selected
 
+
+def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
+                      voxel_idx: int, perm_path: str) -> np.ndarray:
+    """
+    Perform permutation testing comparing intersubject correlation (ISC) with some behavioral measure to test the null
+    hypothesis that there is no correlation between ISC at a given voxel and the behavioral measure. Shuffles the
+    behavioral report and computes the correlation between the shuffled report and the ISC. This is done many times
+    to create a null distribution of correlations. The p-value is then computed as the proportion of the null
+    distribution that is greater than the observed correlation.
+
+    :param isc_data: ISC data
+    :param behav: behavioral data
+    :param n_perm: number of permutations to compute
+    :param voxel_idx: permutations are done on a single voxel assuming the null distribution is the same for all voxels
+    :param perm_path: path to save permutation results
+    :return: saves the permutation results to a pickle file
+    """
+    vox_idx = voxel_idx  # pick just one voxel to do permutations on
+    perm = np.empty(shape=(behav.shape[1], n_perm, 2))  # number of emotions, n_perm, r and p
+    if not os.path.exists(perm_path):  # only compute if file DNE
+        rng = np.random.default_rng()  # for rng.permutation
+        for e in tqdm(range(behav.shape[1])):  # number of emotions
+            for i in tqdm(range(n_perm)):  # number of permutations
+                nan_mask = ~np.isnan(behav[:, e])  # mask to ignore nans for any given pair
+                perm[e, i] = pearsonr(isc_data.T[vox_idx][nan_mask],
+                                      rng.permutation(behav[:, e][nan_mask]))
+        # save perm to pickle
+        with open(perm_path, 'wb') as f:
+            pickle.dump(perm, f)
+    else:
+        with open(perm_path, 'rb') as f:
+            perm = pickle.load(f)
+
+    return perm
