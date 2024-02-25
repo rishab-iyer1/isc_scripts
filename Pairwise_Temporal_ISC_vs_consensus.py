@@ -16,7 +16,7 @@ from nilearn.glm import fdr_threshold
 from scipy.stats import pearsonr, norm
 from tqdm import tqdm
 
-from ISC_Helper import compute_isc, get_rois
+from ISC_Helper import compute_isc, get_rois, permute_isc_behav
 
 # -------------------------------
 # File paths
@@ -35,9 +35,7 @@ rating_path = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/coded_df
 # -------------------------------
 subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]
 subj_ids.sort()
-roi_selected = ['auditory', 'ACC', 'vmPFC', 'insula', 'visualcortex', 'amygdala', 'wholebrain']  # ['auditory',
-# 'visualcortex', 'ACC', 'vmPFC', 'vPCUN', 'aINS_L', 'aANG_L', 'pANG_L', 'Insular_R', 'dPCUN', 'aANG_R', 'aCUN',
-# 'pANG_R', 'PMC_L', 'dPCC', 'insula', 'amygdala', 'wholebrain']
+roi_selected = ['auditory', 'ACC', 'vmPFC', 'insula', 'visualcortex', 'amygdala', 'wholebrain']
 emotions = ['P', 'N', 'M', 'X', 'Cry']
 spatial = False
 pairwise = True
@@ -51,7 +49,8 @@ pairwise_name = "pairwise" if pairwise else "group"
 isc_path = f"{data_path}/isc_{spatial_name}_{pairwise_name}_n{len(subj_ids)}_roi{len(roi_selected)}.pkl"
 
 if not os.path.exists(isc_path):
-    iscs_roi_selected = compute_isc(roi_selected, all_roi_masker, func_fns, spatial=spatial, pairwise=pairwise)
+    iscs_roi_selected = compute_isc(roi_selected, all_roi_masker, func_fns,
+                                    data_path=isc_path, spatial=spatial, pairwise=pairwise)
     with open(isc_path, 'wb') as f:
         pickle.dump(iscs_roi_selected, f)
 else:
@@ -82,37 +81,6 @@ print(np.sum(np.isnan(df_consensus), axis=0))
 n_perm = 1000000
 alpha = int(n_perm * 0.05)
 isc_wholebrain = iscs_roi_selected['wholebrain']
-
-
-def permute_isc_behav(isc: np.ndarray, behav: np.ndarray, num_perms: int, voxel_idx: int, perm_path: str):
-    """
-    Perform permutation testing comparing intersubject correlation (ISC) with some behavioral measure to test the null
-    hypothesis that there is no correlation between ISC at a given voxel and the behavioral measure. Shuffles the
-    behavioral report and computes the correlation between the shuffled report and the ISC. This is done many times
-    to create a null distribution of correlations. The p-value is then computed as the proportion of the null
-    distribution that is greater than the observed correlation.
-
-    :param isc: ISC data
-    :param behav: behavioral data
-    :param num_perms: number of permutations
-    :param voxel_idx: permutations are done on a single voxel assuming the null distribution is the same for all voxels
-    :return: saves the permutation results to a pickle file
-    """
-    vox_idx = voxel_idx  # pick just one voxel to do permutations on
-    perm_vox = np.empty(shape=(behav.shape[1], num_perms, 2))  # number of emotions, n_perm, r and p
-    if not os.path.exists(perm_path):  # only compute if file DNE
-        rng = np.random.default_rng()  # for rng.permutation
-        for e in tqdm(range(df_consensus.shape[1])):  # number of emotions
-            for i in tqdm(range(n_perm)):  # number of permutations
-                nan_mask = ~np.isnan(df_consensus[:, e])  # mask to ignore nans for any given pair
-                perm_vox[e, i] = pearsonr(isc.T[vox_idx][nan_mask],
-                                          rng.permutation(df_consensus[:, e][nan_mask]))
-        # save perm to pickle
-        with open(perm_path, 'wb') as f:
-            pickle.dump(perm_vox, f)
-    else:
-        with open(perm_path, 'rb') as f:
-            perm_vox = pickle.load(f)
 
 perm_vox = permute_isc_behav(isc_wholebrain, df_consensus, n_perm, 1000, f"{data_path}/perm_vox_{n_perm}.pkl")
 
