@@ -47,12 +47,13 @@ def get_rois(all_roi_fpaths) -> Dict[str, NiftiMasker]:
     return all_roi_masker
 
 
-def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: List[str]) -> np.ndarray:
+def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: List[str], data_path: str) -> np.ndarray:
     """
     Loads BOLD data with a single ROI mask
     :param roi: name of the ROI to be loaded
     :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
     :param func_fns: file names of all functional data
+    :param data_path: path to save the masked functional data for each subject
     :return: the functional file masked with the specified ROI
     """
     # all_task_names = ['onesmallstep']
@@ -78,20 +79,26 @@ def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: Li
     #         # Reformat the data to std form
     #         bold_roi[task_name] = np.transpose(np.array(bold_roi[task_name]), [1, 2, 0])
     #     return bold_roi
-
-    n_subjs = len(func_fns)
+    subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]
     # Pick an roi masker
     roi_masker = all_roi_masker[roi]
     bold_roi = []
     # Gather data
-    for subj_id in range(n_subjs):
+    for n, subj_id in enumerate(subj_ids):
         # Get the data for task t, subject s
-        nii_t_s = nib.load(func_fns[subj_id])
-        bold_roi.append(roi_masker.fit_transform(nii_t_s))
-        print(f"subj #{subj_id} loaded and transformed")
+        bold_path = f"{data_path}/bold_roi/{roi}_{subj_id}.npy"
+        if not os.path.exists(bold_path):
+            nii_t_s = nib.load(func_fns[n])
+            bold_roi.append(roi_masker.fit_transform(nii_t_s))
+            print(f"subj #{n}: {subj_id} saved")
+            np.save(bold_path, bold_roi[-1])
+        else:
+            bold_roi.append(np.load(bold_path))
+            print(f"subj #{n}: {subj_id} loaded from file")
 
     # Reformat the data to std form
     bold_roi = np.transpose(np.array(bold_roi), [1, 2, 0])
+
     return bold_roi
 
 
@@ -159,3 +166,48 @@ def plot_spatial_isc(roi_selected: List[str]):
     axes[-1].set_xlabel('TRs')
 
     plt.show()
+
+
+def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, data_path: str,
+                spatial=False, pairwise=False, summary_statistic='mean', tolerate_nans=True, n_trs=454,
+                window_size=30, step_size=5):
+    """
+    Given functional data of shape (n_TRs, n_voxels, n_subjects), computes ISC for the selected ROIs.
+    :param roi_selected: list of all rois to compute ISC over
+    :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
+    :param func_fns: file names of all functional data
+    :param data_path: path to save loaded ROI data
+    :param spatial: Whether to compute spatial ISC (default: temporal)
+    :param pairwise: Whether to compute pairwise ISC (default: group)
+    :param summary_statistic: Which summary statistic to use: mean or median (default: None)
+    :param tolerate_nans: Whether to tolerate NaNs (default: True)
+    :param n_trs: number of TRs in ISC data
+    :param window_size: number of TRs in each window
+    :param step_size: number of TRs to move the window by
+    :return: iscs_roi_selected: a dictionary with roi name (keys) mapped to isc values (values)
+    """
+
+    from tqdm import tqdm
+
+    # compute ISC for all ROIs
+    n_windows = int((n_trs - window_size) / step_size) + 1
+
+    iscs_roi_selected = {}
+    for j, roi_name in (roi_log := tqdm(enumerate(roi_selected), leave=True)):
+        roi_log.set_description(f"Computing ISC for {roi_name}")
+        # Load data
+        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns, data_path)
+        slide_isc = []
+        for i in (window_log := tqdm(range(n_windows), leave=False)):
+            window_log.set_description(f"Window {i}")
+            bold_roi_window = bold_roi[i*step_size:i*step_size+window_size, :, :]
+            if spatial:
+                bold_roi_window = np.transpose(bold_roi, [1, 0, 2])  # becomes (n_voxels, n_TRs, n_subjects)
+            iscs_roi = isc(bold_roi_window, pairwise=pairwise, summary_statistic=summary_statistic,
+                           tolerate_nans=tolerate_nans)
+            slide_isc.append(iscs_roi)
+
+        iscs_roi_selected[roi_name] = np.array(slide_isc)
+
+    return iscs_roi_selected
+
