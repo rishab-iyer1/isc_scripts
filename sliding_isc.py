@@ -6,7 +6,6 @@ import os
 import pickle
 from glob import glob
 from os.path import join
-from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -14,10 +13,8 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 from tqdm import tqdm
 
-from ISC_Helper import get_rois, sliding_isc
-# from ISC_Helper import permute_isc_behav
+from ISC_Helper import get_rois, sliding_isc, permute_isc_behav
 from scipy.stats import pearsonr
-
 
 # -------------------------------
 # File paths
@@ -30,17 +27,14 @@ roi_mask_path = '/Volumes/BCI/Ambivalent_Affect/rois'
 all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii.gz'))
 data_path = '/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/data'
 rating_path = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/coded_df.nc'
-perm_path = '/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/sliding_isc/permutations'
+perm_path = data_path + '/sliding_isc/permutations'
 
 # -------------------------------
 # Parameters
 # -------------------------------
 subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]
 subj_ids.sort()
-# roi_selected = ['wholebrain']
-roi_selected = ['auditory', 'ACC', 'vmPFC', 'insula', 'visualcortex', 'amygdala', 'wholebrain']  # ['auditory',
-# 'visualcortex', 'ACC', 'vmPFC', 'vPCUN', 'aINS_L', 'aANG_L', 'pANG_L', 'Insular_R', 'dPCUN', 'aANG_R', 'aCUN',
-# 'pANG_R', 'PMC_L', 'dPCC', 'insula', 'amygdala', 'wholebrain']
+roi_selected = ['auditory', 'ACC', 'vmPFC', 'insula', 'visualcortex', 'amygdala', 'wholebrain']
 emotions = ['P', 'N', 'M', 'X', 'Cry']
 spatial = False
 pairwise = False
@@ -56,7 +50,7 @@ pairwise_name = "pairwise" if pairwise else "group"
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
 
-# save each 3D image as an nii.gz file, one for each of the 5 emotions
+# save each 3D image as a nii.gz file, one for each of the 5 emotions
 if not os.path.exists(isc_path):
     iscs_roi_selected = sliding_isc(roi_selected, all_roi_masker, func_fns, data_path=data_path, spatial=spatial,
                                     pairwise=pairwise, n_trs=454, window_size=window_size, step_size=step_size)
@@ -65,7 +59,6 @@ if not os.path.exists(isc_path):
 else:
     with open(isc_path, 'rb') as f:
         iscs_roi_selected = pickle.load(f)
-
 
 # generate sliding window and within each window, compute the correlation between ISC and emotional report
 # df = xr.open_dataset(rating_path)
@@ -83,16 +76,16 @@ n_windows = int((df.shape[0] - window_size) / step_size) + 1
 
 slide_behav = []
 for i in range(n_windows):
-    slide_behav.append([P_counts[i*step_size:i*step_size+n_windows].mean(),
-                        N_counts[i*step_size:i*step_size+n_windows].mean(),
-                        M_counts[i*step_size:i*step_size+n_windows].mean(),
-                        X_counts[i*step_size:i*step_size+n_windows].mean(),
-                        Cry_counts[i*step_size:i*step_size+n_windows].mean()])
+    slide_behav.append([P_counts[i * step_size:i * step_size + n_windows].mean(),
+                        N_counts[i * step_size:i * step_size + n_windows].mean(),
+                        M_counts[i * step_size:i * step_size + n_windows].mean(),
+                        X_counts[i * step_size:i * step_size + n_windows].mean(),
+                        Cry_counts[i * step_size:i * step_size + n_windows].mean()])
 slide_behav = np.array(slide_behav)
 
 isc_vmpfc = iscs_roi_selected['vmPFC'].mean(axis=1)
-scaled_isc = isc_vmpfc/np.max(isc_vmpfc)
-slide_behav_scaled = slide_behav/np.max(slide_behav)
+scaled_isc = isc_vmpfc / np.max(isc_vmpfc)
+slide_behav_scaled = slide_behav / np.max(slide_behav)
 
 plt.plot(slide_behav_scaled)
 plt.plot(scaled_isc)
@@ -125,5 +118,12 @@ plt.legend()
 plt.title(f"Correlation between ISC and emotional report")
 plt.show()
 
-n_perm = 1000
-# tqdm(permute_isc_behav(iscs_roi_selected, slide_behav, num_perms=n_perm, voxel_idx=1000, perm_path=f'{perm_path}/size{window_size}_step{step_size}_{n_perm}'))
+n_perm = 1000000
+# perm = {}
+# for roi in roi_selected:
+#     perm[roi] = permute_isc_behav(iscs_roi_selected[roi], slide_behav, n_perm, voxel_idx=100,
+#                                   perm_path=f'{perm_path}/size{window_size}_step{step_size}_{n_perm}_{roi}')
+
+perm_wholebrain = permute_isc_behav(iscs_roi_selected['wholebrain'], slide_behav, n_perm, voxel_idx=1000,
+                                    perm_path=f'{perm_path}/size{window_size}_step{step_size}_{n_perm}_wholebrain')
+
