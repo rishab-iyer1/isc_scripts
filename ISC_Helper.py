@@ -213,8 +213,8 @@ def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
     perm = np.empty(shape=(behav.shape[1], n_perm, 2))  # number of emotions, n_perm, r and p
     if not os.path.exists(perm_path):  # only compute if file DNE
         rng = np.random.default_rng()  # for rng.permutation
-        for e in tqdm(range(behav.shape[1])):  # number of emotions
-            for i in tqdm(range(n_perm)):  # number of permutations
+        for e in tqdm(range(behav.shape[1]), leave=False):  # number of emotions
+            for i in tqdm(range(n_perm), leave=True):  # number of permutations
                 nan_mask = ~np.isnan(behav[:, e])  # mask to ignore nans for any given pair
                 perm[e, i] = pearsonr(isc_data.T[vox_idx][nan_mask],
                                       rng.permutation(behav[:, e][nan_mask]))
@@ -224,5 +224,6 @@ def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
     else:
         with open(perm_path, 'rb') as f:
             perm = pickle.load(f)
+        print("Permutation results loaded from file.")
 
     return perm
