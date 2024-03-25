@@ -206,7 +206,7 @@ nib.save(isc_nii, isc_fn)
 
 """  # raw mean isc without stats
 
-if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz') or True:
+if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz'):
     # Run bootstrap hypothesis test on ISCs
     observed, ci, p, distribution = bootstrap_isc(iscs, pairwise=False,
                                                   ci_percentile=95,
