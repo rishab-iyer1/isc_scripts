@@ -2,6 +2,7 @@
 import os
 from glob import glob
 from os.path import join
+import argparse
 
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -17,6 +18,11 @@ from isc_standalone import (isc, bootstrap_isc, compute_summary_statistic, load_
 # from nilearn.input_data import NiftiMasker, NiftiLabelsMasker originally, but it's deprecated
 # so replace with nilearn.maskers instead
 
+# parser = argparse.ArgumentParser(description='Group ISC')
+# parser.add_argument('--data_dir_func', type=str, description='Path to preprocessed functional data')
+# parser.add_argument('--data_dir_mask', type=str, description='Path to folder with ROI masks')
+# parser.add_argument('--data_dir_mni', type=str, description='Path to wholebrain mask, '
+#                                                             'for example MNI152_T1_2mm_brain_mask.nii.gz')
 data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
 data_dir_mask = '/Volumes/BCI/Ambivalent_Affect/rois'
 data_dir_mni = '~/Downloads'
@@ -24,8 +30,9 @@ data_dir_mni = '~/Downloads'
 # Filenames for MRI data; gzipped NIfTI images (.nii.gz)
 # func_fns = glob(join(data_dir, ('sub-*_task-pieman_space-MNI152NLin2009cAsym'
 #                                 '_desc-tproject_bold.nii.gz')))
-func_fns = glob(join(data_dir_func, '*.nii.gz'))
-# func_fns = glob(join(data_dir_func, 'N1.nii.gz'))  # just one file to test
+func_fns = glob(join(data_dir_func, 'P?.nii.gz')) + glob(join(data_dir_func, 'N?.nii.gz')) + \
+           glob(join(data_dir_func, 'VR?.nii.gz')) + glob(join(data_dir_func, 'P??.nii.gz')) + \
+           glob(join(data_dir_func, 'N??.nii.gz')) + glob(join(data_dir_func, 'VR??.nii.gz'))
 mask_fn = join(data_dir_mask, 'wholebrain.nii.gz')
 mni_fn = join(data_dir_mni, 'MNI152_T1_2mm_brain_mask.nii.gz')
 
@@ -211,7 +218,7 @@ if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz'):
     observed, ci, p, distribution = bootstrap_isc(iscs, pairwise=False,
                                                   ci_percentile=95,
                                                   summary_statistic='median',
-                                                  n_bootstraps=1000)
+                                                  n_bootstraps=100000)
 
     # Get number of NaN voxels
     n_nans = np.sum(np.isnan(observed))
