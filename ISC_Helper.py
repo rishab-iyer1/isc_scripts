@@ -1,7 +1,7 @@
 """
 Helper functions to compute temporal or spatial inter-subject correlation (ISC). Requires isc_standalone.py
-Temporal ISC tells us how the time courses of activity across ROIs are correlated.
-Spatial ISC tells us how the coupling of neural activity changes over time.
+Temporal ISC tells us how the time courses of activity across ROIs are correlated. It can be visualized as a brain map where each voxel (or ROI) has a single ISC value showing how correlated it is across participants.
+Spatial ISC tells us how the coupling of neural activity changes over time. It can be visualized as a time series plot (usually multiple lines where each one represents an ROI) where each time point has a corresponding ISC value.
 Both can be leave-one-out (default) or pairwise. Leave-one-out compares each subject to the average of all others.
 
 Credit to BrainIAK and their ISC tutorial found at https://brainiak.org/tutorials/10-isc/
@@ -20,6 +20,7 @@ from nilearn.maskers import NiftiMasker
 from scipy.stats import pearsonr
 
 from isc_standalone import (isc)
+
 
 # import matplotlib.pyplot as plt
 # import seaborn as sns
@@ -78,7 +79,9 @@ def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: Li
             bold_roi.append(np.load(bold_path))
             print(f"subj #{n}: {subj_id} loaded from file")
 
-    # Reformat the data to std form
+    assert all([bold_roi[0].shape == bold_roi[i].shape for i in range(1, len(bold_roi))]), "dimensions are not consistent"  # check that all the dimensions are the same
+
+    # Reformat the data from (n_subjects, n_TRs, n_voxels) to (n_TRs, n_voxels, n_subjects) to prepare for ISC
     bold_roi = np.transpose(np.array(bold_roi), [1, 2, 0])
 
     return bold_roi
@@ -151,8 +154,8 @@ def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
 #     plt.show()
 
 
-def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, data_path: str,
-                spatial=False, pairwise=False, summary_statistic='mean', tolerate_nans=True, n_trs=454,
+def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, n_trs: int, data_path: str,
+                spatial=False, pairwise=False, summary_statistic='mean', tolerate_nans=True,
                 window_size=30, step_size=5):
     """
     Given functional data of shape (n_TRs, n_voxels, n_subjects), computes ISC for the selected ROIs.
@@ -181,7 +184,7 @@ def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
         slide_isc = []
         for i in (window_log := tqdm(range(n_windows), leave=False)):
             window_log.set_description(f"Window {i}")
-            bold_roi_window = bold_roi[i*step_size:i*step_size+window_size, :, :]
+            bold_roi_window = bold_roi[i * step_size:i * step_size + window_size, :, :]
             if spatial:
                 bold_roi_window = np.transpose(bold_roi, [1, 0, 2])  # becomes (n_voxels, n_TRs, n_subjects)
             iscs_roi = isc(bold_roi_window, pairwise=pairwise, summary_statistic=summary_statistic,
@@ -227,3 +230,11 @@ def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
         print("Permutation results loaded from file.")
 
     return perm
+
+
+def main():
+    pass
+
+
+if __name__ == '__main__':
+    main()
