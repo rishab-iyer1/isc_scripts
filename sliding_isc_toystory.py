@@ -6,9 +6,11 @@ import os, sys
 import pickle
 from glob import glob
 from os.path import join
+import numpy as np
+import matplotlib.pyplot as plt
 
 sys.path.append('/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/scripts')
-from ISC_Helper import get_rois, sliding_isc, phaseshift_sliding_isc
+from ISC_Helper import get_rois, phaseshift_sliding_isc
 
 # -------------------------------
 # File paths
@@ -35,6 +37,7 @@ window_size = 30
 step_size = 5
 n_trs = 300
 n_windows = int((n_trs - window_size) / step_size) + 1
+n_shifts = 1000
 
 # -------------------------------
 # Compute and save ISC
@@ -65,25 +68,25 @@ label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Toy_Story_
 # else:
 #     with open(isc_path, 'rb') as f:
 #         iscs_roi_selected = pickle.load(f)
-phase_slide_isc = phaseshift_sliding_isc(roi_selected=['PCC'], all_roi_masker=get_rois(glob(os.path.join(roi_mask_path, '*PCC*'))),
-                                         func_fns=glob(join(data_dir_func, 'VR??.nii.gz')), n_trs=n_trs, data_path=data_path,
-                                         avg_over_roi=avg_over_roi,
-                                         spatial=spatial, pairwise=pairwise, summary_statistic='median',
-                                         tolerate_nans=True, n_shifts=1000, window_size=window_size,
-                                         step_size=step_size)
 
 # if not os.path.exists(sliding_perm_path):
-#     phase_slide_isc = phaseshift_sliding_isc(roi_selected=roi_selected, all_roi_masker=all_roi_masker,
-#                                                func_fns=func_fns, n_trs=n_trs, data_path=data_path,
-#                                                avg_over_roi=avg_over_roi,
-#                                                spatial=spatial, pairwise=pairwise, summary_statistic='median',
-#                                                tolerate_nans=True, n_shifts=10, window_size=window_size,
-#                                                step_size=step_size)
-#     with open(sliding_perm_path, 'wb') as f:
-#         pickle.dump(phase_slide_isc, f)
+# returns dict of rois and the data for each roi is a tuple containing (observed, p, distribution)
+phase_slide_isc = phaseshift_sliding_isc(roi_selected=roi_selected, all_roi_masker=all_roi_masker,
+                                         func_fns=func_fns, n_trs=n_trs, data_path=data_path,
+                                         avg_over_roi=avg_over_roi,
+                                         spatial=spatial, pairwise=pairwise, summary_statistic='median',
+                                         tolerate_nans=True, n_shifts=n_shifts, window_size=window_size,
+                                         step_size=step_size)
+with open(sliding_perm_path, 'wb') as f:
+    pickle.dump(phase_slide_isc, f)
 # else:
 #     with open(sliding_perm_path, 'rb') as f:
 #         phase_slide_isc = pickle.load(f)
+
+# plot null distribution
+# plt.hist(phase_slide_isc['visualcortex'][2])
+# plt.
+# plt.show()
 
 # generate sliding window and within each window, compute the correlation between ISC and emotional report
 # df = xr.open_dataset(rating_path)
@@ -109,16 +112,12 @@ phase_slide_isc = phaseshift_sliding_isc(roi_selected=['PCC'], all_roi_masker=ge
 #                         Cry_counts[i * step_size:i * step_size + n_windows].mean()])
 # slide_behav = np.array(slide_behav)
 
-# slide_behav = np.load(f'{label_dir}/slide_behav_{task}.npy')
+slide_behav = np.load(f'{label_dir}/slide_behav_{task}.npy')
 #
 # # isc_vmpfc = iscs_roi_selected['vmPFC'].mean(axis=1)
 # # scaled_isc = isc_vmpfc / np.max(isc_vmpfc)
 # # slide_behav_scaled = slide_behav / np.max(slide_behav)
 # #
-# # plt.plot(slide_behav_scaled)
-# # plt.plot(scaled_isc)
-# # plt.legend(emotions)
-# # plt.show()
 # #
 # # mask_img = np.load(f"{data_path}/../mask_img.npy")
 # # ref_nii = nib.load(f"{data_path}/../ref_nii.nii.gz")
@@ -300,27 +299,88 @@ phase_slide_isc = phaseshift_sliding_isc(roi_selected=['PCC'], all_roi_masker=ge
 # # plt.title(f"Betas for each ROI")
 # # plt.show()
 #
-# from sklearn.linear_model import RidgeCV
+from sklearn.linear_model import RidgeCV
+roi_selected = ['PCC']
+true_coefs = np.empty(shape=(len(roi_selected), len(emotions)))
+true_means = []
+true_stds = []
+true_r2s = []
+for r, roi in enumerate(roi_selected):
+    true_isc_data = phase_slide_isc[roi][0].flatten()  # observed, only need p and distribution for perm testing ISC
+    alpha_range = np.logspace(-3, 3, 100)
+    model = RidgeCV(alphas=alpha_range, store_cv_results=True)
+    results = model.fit(slide_behav, true_isc_data)
+    mses = results.cv_results_
+    true_coefs[r] = results.coef_
+    mean_mses = np.mean(mses, axis=0)
+    std_mses = np.std(mses, axis=0)
+
+    true_means.append(mean_mses[np.argmin(mean_mses)])
+    true_stds.append(std_mses[np.argmin(std_mses)])
+    true_r2s.append(model.score(slide_behav, true_isc_data))
+[print(f"emotion consensus explains {true_r2s[r]:.2f} of variance in {roi}") for r, roi in enumerate(roi_selected)]
+
+perm_coefs = []
+perm_means = []
+perm_stds = []
+perm_r2s = []
+for r, roi in enumerate(roi_selected):
+    coefs = np.empty(shape=(len(roi_selected), len(emotions)))
+    means = []
+    stds = []
+    r2s = []
+    for perm in range(n_shifts):
+        shifted_isc_data = phase_slide_isc[roi][-1][perm].flatten()  # observed, only need p and distribution for perm testing ISC
+        alpha_range = np.logspace(-3, 3, 100)
+        model = RidgeCV(alphas=alpha_range, store_cv_results=True)
+        results = model.fit(slide_behav, shifted_isc_data)
+        mses = results.cv_results_
+        mean_mses = np.mean(mses, axis=0)
+        std_mses = np.std(mses, axis=0)
+
+        coefs[r] = results.coef_
+        means.append(mean_mses[np.argmin(mean_mses)])
+        stds.append(std_mses[np.argmin(std_mses)])
+        r2s.append(model.score(slide_behav, shifted_isc_data))
+
+    perm_coefs.append(coefs)
+    perm_means.append(means)
+    perm_stds.append(stds)
+    perm_r2s.append(r2s)
+
+# from isc_standalone import p_from_null
 #
-# coefs = np.empty(shape=(len(roi_selected), len(emotions)))
-# means = []
-# stds = []
-# r2s = []
+# p_roi = {}
+# coef = []
+# mean = []
+# std = []
+# r2 = []
 # for r, roi in enumerate(roi_selected):
-#     alpha_range = np.logspace(-3, 3, 100)
-#     model = RidgeCV(alphas=alpha_range, store_cv_results=True)
-#     results = model.fit(slide_behav, iscs_roi_selected[roi].flatten())
-#     mses = results.cv_results_
-#     coefs[r] = results.coef_
-#     mean_mses = np.mean(mses, axis=0)
-#     std_mses = np.std(mses, axis=0)
+#     coef.append(p_from_null(true_coefs, perm_coefs[r]))
+#     mean.append(p_from_null(true_means, perm_means[r]))
+#     std.append(p_from_null(true_stds, perm_stds[r]))
+#     r2.append(p_from_null(true_r2s, perm_r2s[r]))
 #
-#     means.append(mean_mses[np.argmin(mean_mses)])
-#     stds.append(std_mses[np.argmin(std_mses)])
-#     r2s.append(model.score(slide_behav, iscs_roi_selected[roi].flatten()))
 #
-# [print(f"emotion consensus explains {r2s[r]:.2f} of variance in {roi}") for r, roi in enumerate(roi_selected)]
-#
+# print(f"p-values for {n_shifts} permutations:\n"
+#       f"coefficient: {p_coef:.3f}\n"
+#       f"mean: {p_mean:.3f}\n"
+#       f"std: {p_std:.3f}\n"
+#       f"r2: {p_r2:.3f}\n")
+
+# all_shifted_isc_data = phase_slide_isc[roi][-1]
+# plt.plot(true_isc_data, 'b')
+# plt.plot(all_shifted_isc_data.reshape((55,n_shifts)), alpha=0.4)
+# # plt.legend(emotions)
+# plt.show()
+
+# plot hist of null dist r2s vs real one
+# plt.hist(true_r2s, bins=30, color='blue')
+# plt.hist(perm_r2s, bins=30, color='red')
+# plt.show()
+
+
+
 # # plt.figure()
 # # for i, e in enumerate(emotions):
 # #     plt.bar(np.arange(len(roi_selected)) + i * 0.2, coefs[:, i], width=0.2, label=e, color=['red', 'blue', 'purple', 'dimgray', 'brown'][i])
