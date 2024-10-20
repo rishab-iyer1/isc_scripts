@@ -12,18 +12,19 @@ Rishab Iyer, rsiyer@usc.edu
 import os
 import pickle
 from typing import Dict, List
-from tqdm import tqdm
+
+# from pandas.core.common import random_state
+from tqdm.auto import tqdm
 
 import nibabel as nib
 import numpy as np
 from nilearn.maskers import NiftiMasker
 from scipy.stats import pearsonr
 
-from isc_standalone import (isc)
-
-
-# import matplotlib.pyplot as plt
-# import seaborn as sns
+# from ISC.scripts.Group_ISC_toystory import func_fns
+# from ISC.scripts.sliding_isc import roi_selected
+from isc_standalone import isc, phase_randomize, _check_timeseries_input, compute_summary_statistic, p_from_null, \
+    MAX_RANDOM_SEED
 
 
 def get_rois(all_roi_fpaths) -> Dict[str, NiftiMasker]:
@@ -79,7 +80,8 @@ def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: Li
             bold_roi.append(np.load(bold_path))
             print(f"subj #{n}: {subj_id} loaded from file")
 
-    assert all([bold_roi[0].shape == bold_roi[i].shape for i in range(1, len(bold_roi))]), "dimensions are not consistent"  # check that all the dimensions are the same
+    assert all([bold_roi[0].shape == bold_roi[i].shape for i in
+                range(1, len(bold_roi))]), "dimensions are not consistent"  # check that all the dimensions are the same
 
     # Reformat the data from (n_subjects, n_TRs, n_voxels) to (n_TRs, n_voxels, n_subjects) to prepare for ISC
     bold_roi = np.transpose(np.array(bold_roi), [1, 2, 0])
@@ -155,16 +157,17 @@ def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
 
 
 def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, n_trs: int, data_path: str,
-                spatial=False, pairwise=False, summary_statistic='mean', tolerate_nans=True,
-                window_size=30, step_size=5):
+                avg_over_roi=True, spatial=False, pairwise=False,
+                summary_statistic='median', tolerate_nans=True, window_size=30, step_size=5):
     """
-    Given functional data of shape (n_TRs, n_voxels, n_subjects), computes ISC for the selected ROIs.
+    Given functional data of shape (n_TRs, n_voxels, n_subjects), computes sliding window ISC for the selected ROIs.
     :param roi_selected: list of all rois to compute ISC over
     :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
     :param func_fns: file names of all functional data
     :param data_path: path to save loaded ROI data
-    :param spatial: Whether to compute spatial ISC (default: temporal)
-    :param pairwise: Whether to compute pairwise ISC (default: group)
+    :param avg_over_roi: whether to average the time series over the ROI before computing ISC
+    :param spatial: whether to compute spatial ISC (default: temporal)
+    :param pairwise: whether to compute pairwise ISC (default: group)
     :param summary_statistic: Which summary statistic to use: mean or median (default: None)
     :param tolerate_nans: Whether to tolerate NaNs (default: True)
     :param n_trs: number of TRs in ISC data
@@ -172,28 +175,256 @@ def sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
     :param step_size: number of TRs to move the window by
     :return: iscs_roi_selected: a dictionary with roi name (keys) mapped to isc values (values)
     """
-
-    # compute ISC for all ROIs
-    n_windows = int((n_trs - window_size) / step_size) + 1
-
     iscs_roi_selected = {}
-    for j, roi_name in (roi_log := tqdm(enumerate(roi_selected), leave=True)):
+    for j, roi_name in (roi_log := tqdm(enumerate(roi_selected), leave=True, position=0, ascii=True)):
         roi_log.set_description(f"Computing ISC for {roi_name}")
         # Load data
-        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns, data_path)
-        slide_isc = []
-        for i in (window_log := tqdm(range(n_windows), leave=False)):
-            window_log.set_description(f"Window {i}")
-            bold_roi_window = bold_roi[i * step_size:i * step_size + window_size, :, :]
-            if spatial:
-                bold_roi_window = np.transpose(bold_roi, [1, 0, 2])  # becomes (n_voxels, n_TRs, n_subjects)
-            iscs_roi = isc(bold_roi_window, pairwise=pairwise, summary_statistic=summary_statistic,
-                           tolerate_nans=tolerate_nans)
-            slide_isc.append(iscs_roi)
+        bold_roi = load_roi_data(roi=roi_name, all_roi_masker=all_roi_masker, func_fns=func_fns,
+                                 data_path=data_path)  # shape (n_TRs, n_voxels, n_subjects)
 
-        iscs_roi_selected[roi_name] = np.array(slide_isc)
-
+        iscs_roi_selected[roi_name] = _compute_sliding_isc(bold_roi, n_trs=n_trs, window_size=window_size,
+                                                           step_size=step_size, avg_over_roi=avg_over_roi,
+                                                           spatial=spatial, pairwise=pairwise,
+                                                           summary_statistic=summary_statistic,
+                                                           tolerate_nans=tolerate_nans)
     return iscs_roi_selected
+
+
+def phaseshift_sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, n_trs: int,
+                           data_path: str, avg_over_roi=True, spatial=False, pairwise=False,
+                           summary_statistic='median', tolerate_nans=True, random_state=None, n_shifts=1000, window_size=30, step_size=5):
+    """
+    Given functional data of shape (n_TRs, n_voxels, n_subjects), computes sliding window ISC for the selected ROIs.
+    :param roi_selected: list of all rois to compute ISC over
+    :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
+    :param func_fns: file names of all functional data
+    :param data_path: path to save loaded ROI data
+    :param avg_over_roi: whether to average the time series over the ROI before computing ISC
+    :param spatial: whether to compute spatial ISC (default: temporal)
+    :param pairwise: whether to compute pairwise ISC (default: group)
+    :param summary_statistic: Which summary statistic to use: mean or median (default: None)
+    :param tolerate_nans: Whether to tolerate NaNs (default: True)
+    :param random_state:
+    :param n_shifts:
+    :param n_trs: number of TRs in ISC data
+    :param window_size: number of TRs in each window
+    :param step_size: number of TRs to move the window by
+    :return: iscs_roi_selected: a dictionary with roi name (keys) mapped to isc values (values)
+    """
+    iscs_roi_selected = {}
+    for j, roi_name in (roi_log := tqdm(enumerate(roi_selected), leave=True, position=0, ascii=True)):
+        roi_log.set_description(f"Computing ISC for {roi_name}")
+        # Load data
+        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns, data_path)  # shape (n_TRs, n_voxels, n_subjects)
+
+        iscs_roi_selected[roi_name] = _compute_phaseshift_sliding_isc(bold_roi, n_trs=n_trs, window_size=window_size,
+                                                                      step_size=step_size,
+                                                                      avg_over_roi=avg_over_roi, spatial=spatial,
+                                                                      pairwise=pairwise,
+                                                                      summary_statistic=summary_statistic,
+                                                                      n_shifts=n_shifts,
+                                                                      tolerate_nans=tolerate_nans,
+                                                                      random_state=random_state)
+    return iscs_roi_selected
+
+
+
+
+def _permutation_task(i, data, n_trs, window_size, step_size, avg_over_roi, spatial,
+                      pairwise, summary_statistic, tolerate_nans, random_state):
+    """Helper function to handle the permutation task."""
+    print('Using process', os.getpid())
+    prng = np.random.RandomState(random_state)
+    shifted_data = phase_randomize(data, random_state=prng)
+
+    if pairwise:
+        shifted_isc = _compute_sliding_isc(shifted_data, n_trs, window_size, step_size, avg_over_roi,
+                                           spatial=spatial, pairwise=pairwise, summary_statistic=summary_statistic,
+                                           tolerate_nans=tolerate_nans)
+    else:
+        shifted_data = np.rollaxis(shifted_data, 2, 0)
+        shifted_isc = []
+        for s, shifted_subject in enumerate(shifted_data):
+            nonshifted_mean = np.mean(np.delete(data, s, axis=2), axis=2)
+            loo_isc = _compute_sliding_isc(np.dstack((shifted_subject, nonshifted_mean)), n_trs, window_size,
+                                           step_size, avg_over_roi, spatial=spatial, pairwise=pairwise,
+                                           summary_statistic=summary_statistic, tolerate_nans=tolerate_nans)
+            shifted_isc.append(loo_isc)
+
+        shifted_isc = compute_summary_statistic(np.dstack(shifted_isc), summary_statistic=summary_statistic, axis=2)
+
+    return shifted_isc
+
+
+def _compute_phaseshift_sliding_isc_parallel(data, n_trs, window_size, step_size, avg_over_roi=True, spatial=False,
+                                    pairwise=False, summary_statistic='median', n_shifts=1000, tolerate_nans=True,
+                                    random_state=None, n_jobs=None):
+    """Phase randomization for one-sample ISC test with optional parallelization"""
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import numpy as np
+    from tqdm import tqdm
+
+    data, n_TRs, n_voxels, n_subjects = _check_timeseries_input(data)
+    observed = _compute_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi, spatial=spatial,
+                                    pairwise=pairwise, summary_statistic=summary_statistic, tolerate_nans=tolerate_nans)
+
+    # Create a random state if needed
+    if random_state is None:
+        random_state = np.random.RandomState()
+
+    distribution = []
+
+    with tqdm(total=n_shifts) as pbar:
+        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+            futures = [
+                executor.submit(_permutation_task, i, data, n_trs, window_size, step_size,
+                                avg_over_roi, spatial, pairwise, summary_statistic, tolerate_nans,
+                                random_state.randint(0, MAX_RANDOM_SEED))
+                for i in range(n_shifts)
+            ]
+
+            for future in as_completed(futures):
+                pbar.update(1)
+                distribution.append(future.result())
+
+    distribution = np.stack(distribution)
+
+    # Get p-value for actual median from shifted distribution
+    p = p_from_null(observed, distribution, side='two-sided', exact=False, axis=0)
+
+    return observed, p, distribution
+
+def _compute_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True, spatial=False, pairwise=False,
+                         summary_statistic='median', tolerate_nans=True):
+    """
+    :param data:
+    :param n_trs:
+    :param window_size:
+    :param step_size:
+    :param avg_over_roi:
+    :param spatial:
+    :param pairwise:
+    :param summary_statistic:
+    :param tolerate_nans:
+    :return:
+    """
+    n_windows = int((n_trs - window_size) / step_size) + 1
+    slide_isc = []
+
+    for i in range(n_windows):
+        data_window = data[i * step_size:i * step_size + window_size, :, :]  # shape (window_size, n_voxels, n_subjects)
+        if avg_over_roi:
+            data_window = np.mean(data_window, axis=1, keepdims=True)  # shape (window_size, n_voxels=1, n_subjects)
+        if spatial:
+            data_window = np.transpose(data_window, [1, 0, 2])  # becomes (n_voxels, window_size, n_subjects)
+        slide_isc.append(isc(data_window, pairwise=pairwise, summary_statistic=summary_statistic, tolerate_nans=tolerate_nans))
+
+    return np.array(slide_isc)
+
+
+def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True, spatial=False,
+                                    pairwise=False,
+                                    summary_statistic='median', n_shifts=1000, tolerate_nans=True, random_state=None):
+    """Phase randomization for one-sample ISC test
+    Parameters
+    ----------
+    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+        fMRI data for which to compute ISFC
+
+    n_trs :
+    window_size :
+    step_size :
+    avg_over_roi :
+    spatial :
+    pairwise : bool, default: False
+        Whether to use pairwise (True) or leave-one-out (False) approach
+
+    summary_statistic : str, default: 'median'
+        Summary statistic, either 'median' (default) or 'mean'
+
+    n_shifts : int, default: 1000
+        Number of randomly shifted samples
+
+    tolerate_nans : bool or float, default: True
+        Accommodate NaNs (when averaging in leave-one-out approach)
+
+    random_state : int, None, or np.random.RandomState, default: None
+        Initial random seed
+
+    Returns
+    -------
+    observed : float, observed ISC (without time-shifting)
+        Actual ISCs
+
+    p : float, p-value
+        p-value based on time-shifting randomization test
+
+    distribution : ndarray, time-shifts by voxels (optional)
+        Time-shifted null distribution if return_bootstrap=True
+    """
+
+    # Check response time series input format
+    data, n_TRs, n_voxels, n_subjects = _check_timeseries_input(data)
+
+    # Get actual observed ISC
+    observed = _compute_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi, spatial=spatial,
+                                    pairwise=pairwise, summary_statistic=summary_statistic, tolerate_nans=tolerate_nans)
+
+    # Iterate through randomized shifts to create null distribution
+    distribution = []
+    for i in tqdm(np.arange(n_shifts), position=0, leave=True):
+        # Random seed to be deterministically re-randomized at each iteration
+        if isinstance(random_state, np.random.RandomState):
+            prng = random_state
+        else:
+            prng = np.random.RandomState(random_state)
+
+        # Get shifted version of data
+        shifted_data = phase_randomize(data, random_state=prng)
+        # In pairwise approach, apply all shifts then compute pairwise ISCs
+        if pairwise:
+
+            # Compute null ISC on shifted data for pairwise approach
+            shifted_isc = _compute_sliding_isc(shifted_data, n_trs, window_size, step_size, avg_over_roi,
+                                               spatial=spatial, pairwise=pairwise, summary_statistic=summary_statistic,
+                                               tolerate_nans=tolerate_nans)
+
+        # In leave-one-out, apply shift only to each left-out participant
+        elif not pairwise:
+
+            # Roll subject axis of phase-randomized data
+            shifted_data = np.rollaxis(shifted_data, 2, 0)
+
+            shifted_isc = []
+            for s, shifted_subject in enumerate(shifted_data):
+                # ISC of shifted left-out subject vs mean of N-1 subjects
+                nonshifted_mean = np.mean(np.delete(data, s, axis=2),
+                                          axis=2)
+                # print(time.time() - end)
+                loo_isc = _compute_sliding_isc(np.dstack((shifted_subject, nonshifted_mean)), n_trs, window_size,
+                                               step_size, avg_over_roi, spatial=spatial, pairwise=pairwise,
+                                               summary_statistic=summary_statistic, tolerate_nans=tolerate_nans)
+                shifted_isc.append(loo_isc)
+
+            # Get summary statistics across left-out subjects
+            shifted_isc = compute_summary_statistic(
+                np.dstack(shifted_isc),
+                summary_statistic=summary_statistic, axis=2)
+        distribution.append(shifted_isc)
+
+        # Update random state for next iteration
+        random_state = np.random.RandomState(prng.randint(0, MAX_RANDOM_SEED))
+
+    # Convert distribution to numpy array
+    distribution = np.stack(distribution)
+
+    # Get p-value for actual median from shifted distribution
+    p = p_from_null(observed, distribution,
+                    side='two-sided', exact=False,
+                    axis=0)
+
+    return observed, p, distribution
 
 
 def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
@@ -216,8 +447,8 @@ def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
     perm = np.empty(shape=(behav.shape[1], n_perm, 2))  # number of emotions, n_perm, r and p
     if not os.path.exists(perm_path):  # only compute if file DNE
         rng = np.random.default_rng()  # for rng.permutation
-        for e in tqdm(range(behav.shape[1]), leave=False):  # number of emotions
-            for i in tqdm(range(n_perm), leave=True):  # number of permutations
+        for e in tqdm(range(behav.shape[1]), leave=True):  # number of emotions
+            for i in tqdm(range(n_perm), leave=False):  # number of permutations
                 nan_mask = ~np.isnan(behav[:, e])  # mask to ignore nans for any given pair
                 perm[e, i] = pearsonr(isc_data.T[vox_idx][nan_mask],
                                       rng.permutation(behav[:, e][nan_mask]))
