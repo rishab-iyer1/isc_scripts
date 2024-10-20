@@ -1584,10 +1584,10 @@ def phase_randomize(data, voxelwise=False, random_state=None):
 
     if not voxelwise:
         phase_shifts = (prng.rand(len(pos_freq), 1, n_subjects)
-                        * 2 * np.math.pi)
+                        * 2 * np.pi)
     else:
         phase_shifts = (prng.rand(len(pos_freq), n_voxels, n_subjects)
-                        * 2 * np.math.pi)
+                        * 2 * np.pi)
 
     # Fast Fourier transform along time dimension of data
     fft_data = fft(data, axis=0)
