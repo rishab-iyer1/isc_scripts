@@ -4,9 +4,10 @@ ISC with sliding window to capture variations in relationship between ISC and em
 
 import os, sys
 import pickle
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import cProfile
 import pstats
+import time
 from glob import glob
 from os.path import join
 import numpy as np
@@ -16,7 +17,7 @@ from sklearn.linear_model import RidgeCV
 
 sys.path.append('/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/scripts')
 from isc_standalone import p_from_null
-from ISC_Helper import get_rois, phaseshift_sliding_isc
+from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data, phaseshift_sliding_isc
 
 # -------------------------------
 # Parameters
@@ -36,8 +37,8 @@ if task == 'toystory':
 elif task == 'onesmallstep':
     n_trs = 484
 n_windows = int((n_trs - window_size) / step_size) + 1
-n_shifts = 6
-batch_size = 3
+n_shifts = 1000
+batch_size = 25
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -109,50 +110,110 @@ sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{windo
 # returns dict of rois and the data for each roi is a tuple containing (observed, p, distribution)
 
 #
-def main():
-    with cProfile.Profile() as profile:
-        if not os.path.exists(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"):
-            with ProcessPoolExecutor() as executor:
-                from time import time
-                from itertools import repeat
-                start = time()
-                phase_slide_isc = list(tqdm(executor.map(phaseshift_sliding_isc, repeat(roi_selected[:2]), repeat(all_roi_masker),
-                                                        repeat(func_fns), repeat(n_trs), repeat(data_path),
-                                                        repeat(avg_over_roi),
-                                                        repeat(spatial), repeat(pairwise), repeat('median'),
-                                                        repeat(True), repeat(random_state), [n_shifts/batch_size]*batch_size, repeat(window_size),
-                                                        repeat(step_size)), total=n_shifts))   # n_jobs = None will perform multiprocessing on as many cpus as possible
-                end = time()
-                print(f"{(end-start):.2f} seconds")
-        results = pstats.Stats(profile)
-        results.sort_stats(pstats.SortKey.TIME)
-        results.print_stats()
-        # with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
-        #     pickle.dump(phase_slide_isc, f)
+# working version
+# def main():
+#     with cProfile.Profile() as profile:
+#         # if not os.path.exists(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"):
+#         with ProcessPoolExecutor() as executor:
+#             from time import time
+#             from itertools import repeat
+#             start = time()
+#             phase_slide_isc = list(tqdm(executor.map(phaseshift_sliding_isc, repeat(roi_selected), repeat(all_roi_masker),
+#                                                     repeat(func_fns), repeat(n_trs), repeat(data_path),
+#                                                     repeat(avg_over_roi),
+#                                                     repeat(spatial), repeat(pairwise), repeat('median'),
+#                                                     repeat(True), repeat(random_state), [n_shifts/batch_size]*batch_size, repeat(window_size),
+#                                                     repeat(step_size)), total=n_shifts))   # n_jobs = None will perform multiprocessing on as many cpus as possible
+#             end = time()
+#             print(f"{(end-start):.2f} seconds")
+#         results = pstats.Stats(profile)
+#         results.sort_stats(pstats.SortKey.TIME)
+#         results.print_stats()
+#         with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
+#             pickle.dump(phase_slide_isc, f)
 #     else:
 # with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'rb') as f:
 #     phase_slide_isc = pickle.load(f)
+
+# trying to parallelize and optimize memory by not loading rois many times
+
+def unpack_and_call(func, kwargs):
+    return func(**kwargs)
+
+
+def main():
+    # func_fns = func_fns[:3]
+    # roi_selected = roi_selected[:2]
+    # bold_roi = []
+    # for roi_name in roi_selected:
+    #     print(f"Loading {roi_name} data")
+    #     bold_roi.append(load_roi_data(roi_name, all_roi_masker, func_fns, data_path))  # shape (n_TRs, n_voxels, n_subjects)
+
+    from itertools import repeat
+    start = time.perf_counter()
+    with ThreadPoolExecutor() as executor:
+        bold_roi = executor.map(load_roi_data, roi_selected, repeat(all_roi_masker), repeat(func_fns), repeat(data_path))  # repeat is used to pass the parameter to each iteration in map(). the 
+
+    end = time.perf_counter()
+    print(f"Data loaded in {end-start:.3f} sec")
+            
+    # err
+    from functools import partial
+    n_shifts_batch = int(n_shifts/batch_size)
+    kwargs = [{"n_shifts":n_shifts_batch} for _ in range(batch_size)]
+    iscs_roi_selected = dict()
+    for i, roi in enumerate(bold_roi):
+        func = partial(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
+                                                                            step_size=step_size,
+                                                                            avg_over_roi=avg_over_roi, spatial=spatial,
+                                                                            pairwise=pairwise,
+                                                                            summary_statistic='median',
+                                                                            n_shifts=n_shifts_batch,
+                                                                            tolerate_nans=True,
+                                                                            random_state=random_state)
+        with ProcessPoolExecutor() as executor:
+            iscs_roi_selected[roi_selected[i]] = list(tqdm(executor.map(unpack_and_call, [func]*len(kwargs), kwargs), total=len(kwargs)))
+
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
+            pickle.dump(iscs_roi_selected, f)
+        # kwargs = [{"data":roi for roi in bold_roi}]
+        # with tqdm(total=n_shifts_batch) as pbar:
+                # futures = [executor.submit(_compute_phaseshift_sliding_isc, bold, n_trs=n_trs, window_size=window_size,
+                #                                                             step_size=step_size,
+                #                                                             avg_over_roi=avg_over_roi, spatial=spatial,
+                #                                                             pairwise=pairwise,
+                #                                                             summary_statistic='median',
+                #                                                             n_shifts=n_shifts_batch,
+                #                                                             tolerate_nans=True,
+                #                                                             random_state=random_state) for bold in bold_roi]
+            
+                # for future in as_completed(futures):
+                #     iscs_roi_selected[roi_name] = future.result()
+                #     pbar.update(1)
+    
+    # after parallelizing, the n batches are in n separate elements of phase_slide_isc; recombine them so that we have one nparray of observed, p, distribution for each roi
+    x = {roi: [np.empty(shape=(n_windows, 1)), np.empty(shape=(n_windows, 1)), np.empty(shape=(n_shifts, n_windows, 1))] for roi in roi_selected} # init empty dict with appropriate shapes
+    for roi in roi_selected:
+        assert np.all(iscs_roi_selected[roi][0][0] == iscs_roi_selected[roi][1][0])  # make sure the "observed" is the same - should never change across batches
+        assert np.all(iscs_roi_selected[roi][0][0] == iscs_roi_selected[roi][2][0])
+
+        # joining the batched distributions
+        dist = []
+        for i in range(batch_size):  # number of loops = number of batches
+            dist.append(iscs_roi_selected[roi][i][2])
+
+        x[roi][0] = iscs_roi_selected[roi][0][0]  # take one of the "observed" ISC matrices since we asserted that they're all the same
+        x[roi][2] = np.concatenate(dist)  # concatenate all n_shifts permutations
+        x[roi][1] = p_from_null(x[roi][0], x[roi][2], side='two-sided', exact=False, axis=0)  # need to re-calculate p-values after concatenating permutations
+    with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'wb') as f:
+            pickle.dump(x, f)
+
 if __name__ == '__main__':
     main()
 err
 
 slide_behav = np.load(f'{label_dir}/slide_behav_{task}_{smooth}.npy')
 print(len(phase_slide_isc), len(slide_behav))
-
-# after parallelizing, the n batches are in n separate elements of phase_slide_isc; recombine them so that we have one nparray of observed, p, distribution for each roi
-x = {roi: [np.empty(shape=(n_windows, 1)), np.empty(shape=(n_windows, 1)), np.empty(shape=(n_shifts//batch_size, n_windows, 1))] for roi in roi_selected} # init empty dict with appropriate shapes
-for roi in roi_selected:
-    assert np.all(phase_slide_isc[0][roi][0] == phase_slide_isc[1][roi][0])  # make sure the "observed" is the same - should never change across batches
-    assert np.all(phase_slide_isc[0][roi][0] == phase_slide_isc[2][roi][0])
-
-    # joining the batched distributions
-    dist = []
-    for i in range(len(phase_slide_isc)):
-        dist.append(phase_slide_isc[i][roi][2])
-
-    x[roi][0] = phase_slide_isc[0][roi][0]
-    x[roi][2] = np.concatenate(dist)  # concatenate all n_shifts permutations
-    x[roi][1] = p_from_null(x[roi][0], x[roi][2], side='two-sided', exact=False, axis=0)
 
 true_coefs = np.empty(shape=(len(roi_selected), len(emotions)))
 true_means = []
