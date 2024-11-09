@@ -2,11 +2,10 @@
 ISC with sliding window to capture variations in relationship between ISC and emotional report
 """
 
-import os, sys
+import os
 import pickle
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import cProfile
-import pstats
 import time
 from glob import glob
 from os.path import join
@@ -14,10 +13,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.linear_model import RidgeCV
-
-sys.path.append('/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/scripts')
 from isc_standalone import p_from_null
-from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data, phaseshift_sliding_isc, profile_function
+from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data
 
 # -------------------------------
 # Parameters
@@ -34,11 +31,14 @@ window_size = 30
 step_size = 5
 if task == 'toystory':
     n_trs = 300
+    n_shifts = 1002
 elif task == 'onesmallstep':
     n_trs = 484
+    n_shifts = 4032
+else:
+    raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-n_shifts = 1000
-batch_size = 10
+batch_size = 16
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -63,7 +63,7 @@ if task == 'toystory':
     func_fns = [fn for fn in func_fns if 'VR7' not in fn and 'VR8' not in fn]
     label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Toy_Story_Labelled'
 elif task == 'onesmallstep':
-    pass
+    label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/OSS_Labelled'
 
 subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]  # assume BIDS format
 subj_ids.sort()
@@ -77,7 +77,7 @@ figure_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/figures/{task}'
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
 sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}"
-
+# TODO create paths if dont exist, like figpath
 
 # -------------------------------
 # Compute and save ISC
@@ -117,24 +117,24 @@ def unpack_and_call(func, kwargs):
 #
 # working version
 # def main():
-#     with cProfile.Profile() as profile:
+#     # with cProfile.Profile() as profile:
 #         # if not os.path.exists(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"):
-#         with ProcessPoolExecutor() as executor:
-#             from time import time
-#             from itertools import repeat
-#             start = time()
-#             phase_slide_isc = list(tqdm(executor.map(phaseshift_sliding_isc, repeat(roi_selected[1:3]), repeat(all_roi_masker),
-#                                                     repeat(func_fns[:2]), repeat(n_trs), repeat(data_path),
-#                                                     repeat(avg_over_roi),
-#                                                     repeat(spatial), repeat(pairwise), repeat('median'),
-#                                                     repeat(True), repeat(random_state), [n_shifts/batch_size]*batch_size, repeat(window_size),
-#                                                     repeat(step_size)), total=n_shifts))   # n_jobs = None will perform multiprocessing on as many cpus as possible
-#             executor.shutdown(wait=False)
-#             end = time()
-#             print(f"{(end-start):.2f} seconds")
-#         results = pstats.Stats(profile)
-#         results.sort_stats(pstats.SortKey.TIME)
-#         results.print_stats()
+#     with ProcessPoolExecutor() as executor:
+#         from time import time
+#         from itertools import repeat
+#         start = time()
+#         phase_slide_isc = list(tqdm(executor.map(phaseshift_sliding_isc, repeat(roi_selected[1:3]), repeat(all_roi_masker),
+#                                                 repeat(func_fns[:2]), repeat(n_trs), repeat(data_path),
+#                                                 repeat(avg_over_roi),
+#                                                 repeat(spatial), repeat(pairwise), repeat('median'),
+#                                                 repeat(True), repeat(random_state), [n_shifts/batch_size]*batch_size, repeat(window_size),
+#                                                 repeat(step_size)), total=n_shifts))   # n_jobs = None will perform multiprocessing on as many cpus as possible
+#         # executor.shutdown(wait=False)
+#         end = time()
+#         print(f"{(end-start):.2f} seconds")
+#         # results = pstats.Stats(profile)
+#         # results.sort_stats(pstats.SortKey.TIME)
+#         # results.print_stats()
 #         with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
 #             pickle.dump(phase_slide_isc, f)
 #     else:
@@ -193,90 +193,145 @@ def unpack_and_call(func, kwargs):
 if __name__ == '__main__':
     # main()
     # print('here')
-    # roi_selected = roi_selected[1:3]
-    # func_fns = func_fns
-    from itertools import repeat
-    start = time.perf_counter()
-    with ThreadPoolExecutor() as executor:
-        bold_roi = executor.map(load_roi_data, roi_selected, repeat(all_roi_masker), repeat(func_fns), repeat(data_path))  # repeat is used to pass the parameter to each iteration in map(). the 
+    if task == 'onesmallstep':
+        roi_selected = roi_selected[1:]
+    # func_fns = func_fns[:20]
+    if not os.path.exists(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"):
+        print("permutation path doesn't exist, computing...")
+        from itertools import repeat
+        start = time.perf_counter()
+        # n_workers = len(subj_ids)*len(roi_selected)
+        # print(f"using {n_workers} threads to load data")
+        # with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        with ThreadPoolExecutor() as executor:
+            bold_roi = executor.map(load_roi_data, roi_selected, repeat(all_roi_masker), repeat(func_fns), repeat(data_path))  # repeat is used to pass the parameter to each iteration in map(). the 
 
-        # executor.shutdown(wait=False)
-    end = time.perf_counter()
-    print(f"Data loaded in {end-start:.3f} sec")
-            
-    # err
-    from functools import partial
-    n_shifts_batch = int(n_shifts/batch_size)
-    kwargs = [{"n_shifts":n_shifts_batch} for _ in range(batch_size)]
-    iscs_roi_selected = dict(zip(roi_selected, [[] for _ in range(len(roi_selected))]))
-    for i, roi in tqdm(enumerate(bold_roi)):
-        # func = partial(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
-        #                                                                     step_size=step_size,
-        #                                                                     avg_over_roi=avg_over_roi, spatial=spatial,
-        #                                                                     pairwise=pairwise,
-        #                                                                     summary_statistic='median',
-        #                                                                     n_shifts=n_shifts_batch,
-        #                                                                     tolerate_nans=True,
-        #                                                                     random_state=random_state)
-        # with ProcessPoolExecutor() as executor:
-        #     start_time = time.time()
-        #     iscs_roi_selected[roi_selected[i]] = list(tqdm(executor.map(unpack_and_call, [func]*len(kwargs), kwargs), total=len(kwargs)))
-        #     print(f"Executor map took {time.time() - start_time:.2f} seconds")
-            # iscs_roi_selected[roi_selected[i]] = list(executor.map(unpack_and_call, [func]*len(kwargs), kwargs))
-            # Start timing
-        start_time = time.time()
-        with ProcessPoolExecutor() as executor:
-            futures = []
-            for n_batch in (pbar := tqdm([n_shifts_batch]*batch_size)):
-                futures.append(executor.submit(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
-                                                                    step_size=step_size,
-                                                                    avg_over_roi=avg_over_roi, spatial=spatial,
-                                                                    pairwise=pairwise,
-                                                                    summary_statistic='median',
-                                                                    n_shifts=n_batch,
-                                                                    tolerate_nans=True,
-                                                                    random_state=random_state))
-                # futures.append(executor.submit(dummy))
-            for future in tqdm(as_completed(futures), total=len(futures)):
-                try:
-                    # print(future.result().shape)
-                    iscs_roi_selected[roi_selected[i]].append(future.result())
-                    pbar.update(1)
-                except Exception as e:
-                    print(f"Task generated an exception: {e}")
+            # executor.shutdown(wait=False)
+        end = time.perf_counter()
+        print(f"Data loaded in {end-start:.3f} sec")
+                
+        # # # err
+        # from functools import partial
+        n_shifts_batch = int(n_shifts/batch_size)
+        # kwargs = [{"n_shifts":n_shifts_batch} for _ in range(batch_size)]
+        iscs_roi_selected = dict(zip(roi_selected, [[] for _ in range(len(roi_selected))]))
+        with cProfile.Profile() as profile:
+            for i, roi in enumerate(bold_roi):
+                print(f'starting permutations for {roi_selected[i]}')
+                # func = partial(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
+                #                                                                     step_size=step_size,
+                #                                                                     avg_over_roi=avg_over_roi, spatial=spatial,
+                #                                                                     pairwise=pairwise,
+                #                                                                     summary_statistic='median',
+                #                                                                     n_shifts=n_shifts_batch,
+                #                                                                     tolerate_nans=True,
+                #                                                                     random_state=random_state)
+                # with ProcessPoolExecutor() as executor:
+                #     start_time = time.time()
+                #     iscs_roi_selected[roi_selected[i]] = list(tqdm(executor.map(unpack_and_call, [func]*len(kwargs), kwargs), total=len(kwargs)))
+                #     print(f"Executor map took {time.time() - start_time:.2f} seconds")
+                #     iscs_roi_selected[roi_selected[i]] = list(executor.map(unpack_and_call, [func]*len(kwargs), kwargs))
 
-            executor.shutdown(wait=False)
-        # Print how long the executor took
-        print(f"Executor submit and as_completed took {time.time() - start_time:.2f} seconds")
-    # print(iscs_roi_selected['visualcortex'][0][0].shape, iscs_roi_selected['visualcortex'][0][1].shape, iscs_roi_selected['visualcortex'][0][2].shape)
-    # print(iscs_roi_selected['visualcortex'][1][0].shape, iscs_roi_selected['visualcortex'][1][1].shape, iscs_roi_selected['visualcortex'][1][2].shape)
-    # print(iscs_roi_selected['auditory'][0][0].shape, iscs_roi_selected['auditory'][0][1].shape, iscs_roi_selected['auditory'][0][2].shape)
-    # print(iscs_roi_selected['auditory'][1][0].shape, iscs_roi_selected['auditory'][1][1].shape, iscs_roi_selected['auditory'][1][2].shape)
-    # with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
-    #     pickle.dump(iscs_roi_selected, f)
-    
-    # after parallelizing, the n batches are in n separate elements of phase_slide_isc; recombine them so that we have one nparray of observed, p, distribution for each roi
-    x = {roi: [np.empty(shape=(n_windows, 1)), np.empty(shape=(n_windows, 1)), np.empty(shape=(n_shifts, n_windows, 1))] for roi in roi_selected} # init empty dict with appropriate shapes
-    for roi in roi_selected:
-        # joining the batched distributions
-        dist = []
-        for i in range(batch_size):  # number of loops = number of batches
-            assert np.all(iscs_roi_selected[roi][0][0] == iscs_roi_selected[roi][i][0])  # make sure the "observed" is the same - should never change across batches
-            dist.append(iscs_roi_selected[roi][i][2])
+                # # executor.shutdown(wait=False)
+                # # print('executor shutdown complete')
+                # with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
+                #     pickle.dump(iscs_roi_selected, f)
 
-        x[roi][0] = iscs_roi_selected[roi][0][0]  # take one of the "observed" ISC matrices since we asserted that they're all the same
-        x[roi][2] = np.concatenate(dist)  # concatenate all n_shifts permutations
-        x[roi][1] = p_from_null(x[roi][0], x[roi][2], side='two-sided', exact=False, axis=0)  # need to re-calculate p-values after concatenating permutations
-    with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'wb') as f:
-            pickle.dump(x, f)
-            print('saved permutations to', f)
 
-# with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'rb') as f:
-#             data = pickle.load(f)
-err
+                # Start timing
+                start_time = time.time()
+                with ThreadPoolExecutor() as executor:
+                    futures = []
+                    for n_batch in (pbar := tqdm([n_shifts_batch]*batch_size)):
+                        futures.append(executor.submit(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
+                                                                            step_size=step_size,
+                                                                            avg_over_roi=avg_over_roi, spatial=spatial,
+                                                                            pairwise=pairwise,
+                                                                            summary_statistic='median',
+                                                                            n_shifts=n_batch,
+                                                                            tolerate_nans=True,
+                                                                            random_state=random_state))
 
+                    for future in tqdm(as_completed(futures), total=len(futures)):
+                        try:
+                            # print(future.result().shape)
+                            iscs_roi_selected[roi_selected[i]].append(future.result())
+                            pbar.update(1)
+                        except Exception as e:
+                            print(f"Task generated an exception: {e}")
+
+                    # executor.shutdown(wait=False)
+                # Print how long the executor took
+                print(f"Executor submit and as_completed took {time.time() - start_time:.2f} seconds")
+            # results = pstats.Stats(profile)
+            # results.sort_stats(pstats.SortKey.TIME)
+            # results.print_stats()
+
+        # print(iscs_roi_selected['visualcortex'][0][0].shape, iscs_roi_selected['visualcortex'][0][1].shape, iscs_roi_selected['visualcortex'][0][2].shape)
+        # print(iscs_roi_selected['visualcortex'][1][0].shape, iscs_roi_selected['visualcortex'][1][1].shape, iscs_roi_selected['visualcortex'][1][2].shape)
+        # print(iscs_roi_selected['auditory'][0][0].shape, iscs_roi_selected['auditory'][0][1].shape, iscs_roi_selected['auditory'][0][2].shape)
+        # print(iscs_roi_selected['auditory'][1][0].shape, iscs_roi_selected['auditory'][1][1].shape, iscs_roi_selected['auditory'][1][2].shape)
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
+            pickle.dump(iscs_roi_selected, f)
+        
+        # after parallelizing, the n batches are in n separate elements of phase_slide_isc; recombine them so that we have one nparray of observed, p, distribution for each roi
+        x = {roi: [np.empty(shape=(n_windows, 1)), np.empty(shape=(n_windows, 1)), np.empty(shape=(n_shifts, n_windows, 1))] for roi in roi_selected} # init empty dict with appropriate shapes
+        for roi in roi_selected:
+            # joining the batched distributions
+            dist = []
+            for i in range(batch_size):  # number of loops = number of batches
+                assert np.all(iscs_roi_selected[roi][0][0] == iscs_roi_selected[roi][i][0])  # make sure the "observed" is the same - should never change across batches
+                dist.append(iscs_roi_selected[roi][i][2])
+
+            x[roi][0] = iscs_roi_selected[roi][0][0]  # take one of the "observed" ISC matrices since we asserted that they're all the same
+            x[roi][2] = np.concatenate(dist)  # concatenate all n_shifts permutations
+            x[roi][1] = p_from_null(x[roi][0], x[roi][2], side='two-sided', exact=False, axis=0)  # need to re-calculate p-values after concatenating permutations
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'wb') as f:
+                pickle.dump(x, f)
+                print('saved permutations to', f)
+
+    else:
+        # if task == 'onesmallstep':
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'rb') as f:
+            x = pickle.load(f)
+            print('permutations loaded from file')
+        # elif task == 'toystory':
+        #     with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'rb') as f:
+        #         x = pickle.load(f)
+        #         print('permutations loaded from file')
+
+# if task == 'toystory':
 slide_behav = np.load(f'{label_dir}/slide_behav_{task}_{smooth}.npy')
-print(len(phase_slide_isc), len(slide_behav))
+# elif task == 'onesmallstep':
+    # import pandas as pd
+    # df = pd.read_excel('/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Label_Aggregate.xlsx', skiprows=[0])
+    # # Compute the percentage of subjects in each state at each time point
+    # P_counts = df[df == 'P'].count(axis=1)
+    # N_counts = df[df == 'N'].count(axis=1)
+    # M_counts = df[df == 'M'].count(axis=1)
+    # X_counts = df[df == 'X'].count(axis=1)
+    # Cry_counts = df[df == 'Cry'].count(axis=1)
+
+    # # n_windows = int((df.shape[0] - window_size) / step_size) + 1
+
+    # slide_behav = []
+    # for i in range(n_windows):
+    #     slide_behav.append([P_counts[i * step_size:i * step_size + n_windows].mean(),
+    #                         N_counts[i * step_size:i * step_size + n_windows].mean(),
+    #                         M_counts[i * step_size:i * step_size + n_windows].mean(),
+    #                         X_counts[i * step_size:i * step_size + n_windows].mean(),
+    #                         Cry_counts[i * step_size:i * step_size + n_windows].mean()])
+    # slide_behav = np.array(slide_behav)
+
+
+
+'''
+remove wholebrain from following analysis since we skipped it for the permutation iscs (temporarily)
+'''
+print('shape before removing', len(x), slide_behav.shape)  # 8 rois, shape=(n_windows, n_emotions)
+# remove crying and neutral to just focus on pos, neg, mix, for 8 rois
+slide_behav = slide_behav[:, :3]
+emotions = emotions[:3]
 
 true_coefs = np.empty(shape=(len(roi_selected), len(emotions)))
 true_means = []
@@ -519,7 +574,8 @@ perm_coefs = np.empty(shape=(len(roi_selected), n_shifts, len(emotions)))
 perm_means = []
 perm_stds = []
 perm_r2s = np.empty(shape=(len(roi_selected), n_shifts))
-for r, roi in enumerate(roi_selected):
+
+for r, roi in tqdm(enumerate(roi_selected), total=len(roi_selected)):
     coefs = []
     means = []
     stds = []
@@ -549,7 +605,7 @@ p_coef = np.empty(shape=(len(roi_selected), len(emotions)))
 p_mean = []
 p_std = []
 p_r2 = np.empty(shape=(len(roi_selected)))
-for r, roi in enumerate(roi_selected):
+for r, roi in tqdm(enumerate(roi_selected), total=len(roi_selected)):
     for e, emo in enumerate(emotions):
         p_coef[r][e] = (p_from_null(true_coefs[r, e], perm_coefs[r,:,e]))
         # p_mean.append(p_from_null(true_means[r], perm_means[r]))
@@ -564,24 +620,23 @@ for r, roi in enumerate(roi_selected):
     # p_r2.append(p_from_null(true_r2s[r], perm_r2s[r]))
 
 # print the rois that are significant at p < 0.05 for each metric along with the value of the metric, rounded to 2 decimal places
-for r, roi in enumerate(roi_selected):
+for r, roi in tqdm(enumerate(roi_selected), total=len(roi_selected)):
     for e, emo in enumerate(emotions):
-        if p_coef[r][e] < 0.05/9:
+        if p_coef[r][e] < 0.05/len(roi_selected):
             print(f"{roi}, {emo}: Coef = {true_coefs[r, e]:.2f}, p = {p_coef[r][e]:.2f}")
             # print(f"{roi}: Coef = {true_coefs[r]:.2f}, p = {p_coef[r]:.2f}")
     # if p_mean[r] < 0.05:
     #     print(f"{roi}: Mean = {true_means[r]:.2f}, p = {p_mean[r]:.2f}")
     # if p_std[r] < 0.05:
     #     print(f"{roi}: Std = {true_stds[r]:.2f}, p = {p_std[r]:.2f}")
-    if p_r2[r] < 0.05/9:
+    if p_r2[r] < 0.05/len(roi_selected):
         print(f"{roi}: R2 = {true_r2s[r]:.2f}, p = {p_r2[r]:.2f}")
-
 
 # plot the true and permuted distributions for the coefs for each emotion, all on the same plot
 # Plot the null distribution for the coefficients along with the actual values
+print('plotting true vs null dist')
 plt.figure(figsize=(15, 10))
-
-for r, roi in enumerate(roi_selected):
+for r, roi in tqdm(enumerate(roi_selected), total=len(roi_selected)):
     for e, emo in enumerate(emotions):
         plt.subplot(len(roi_selected), len(emotions), r * len(emotions) + e + 1)
         plt.hist(perm_coefs[r, :, e], bins=30, color='blue', alpha=0.5, label='Null Distribution')
@@ -592,21 +647,47 @@ for r, roi in enumerate(roi_selected):
         plt.legend()
 
 plt.tight_layout()
-plt.show()
+plt.savefig(f'{figure_path}/true_vs_null')
+
+# # plot only for visual
+# plt.figure(figsize=(15, 10))
+# for e, emo in enumerate(emotions):
+#     plt.subplot(1, len(emotions), e + 1)
+#     plt.hist(perm_coefs[0, :, e], bins=100, color='blue', alpha=0.5, label='Null Distribution')
+#     plt.axvline(true_coefs[0, e], color='red', linestyle='dashed', linewidth=2, label='Actual Value')
+#     plt.title(f"visual cortex - {emo}")
+#     plt.xlabel('Coefficient Value')
+#     plt.ylabel('Frequency')
+#     plt.legend()
+# # plt.show()
+# plt.savefig(f'{figure_path}/visual_corr')
+
+# # plot only for amygdala
+# plt.figure(figsize=(15, 10))
+# for e, emo in enumerate(emotions):
+#     plt.subplot(1, len(emotions), e + 1)
+#     plt.hist(perm_coefs[6, :, e], bins=100, color='blue', alpha=0.5, label='Null Distribution')
+#     plt.axvline(true_coefs[6, e], color='red', linestyle='dashed', linewidth=2, label='Actual Value')
+#     plt.title(f"amygdala - {emo}")
+#     plt.xlabel('Coefficient Value')
+#     plt.ylabel('Frequency')
+#     plt.legend()
+# # plt.show()
+# plt.savefig(f'{figure_path}/amygdala_corr')
+
 
 # plot only for PCC
 plt.figure(figsize=(15, 10))
 for e, emo in enumerate(emotions):
     plt.subplot(1, len(emotions), e + 1)
-    plt.hist(perm_coefs[5, :, e], bins=100, color='blue', alpha=0.5, label='Null Distribution')
-    plt.axvline(true_coefs[5, e], color='red', linestyle='dashed', linewidth=2, label='Actual Value')
+    plt.hist(perm_coefs[4, :, e], bins=100, color='blue', alpha=0.5, label='Null Distribution')
+    plt.axvline(true_coefs[4, e], color='red', linestyle='dashed', linewidth=2, label='Actual Value')
     plt.title(f"PCC - {emo}")
     plt.xlabel('Coefficient Value')
     plt.ylabel('Frequency')
     plt.legend()
-
-plt.show()
-
+# plt.show()
+plt.savefig(f'{figure_path}/PCC_corr')
 
 
 # import matplotlib.pyplot as plt
@@ -633,7 +714,6 @@ plt.show()
 # plt.legend(title='Emotion')
 # plt.tight_layout()
 # plt.show()
-
 
 
 # plot the true and permuted distributions for the isc values for each emotion and roi
