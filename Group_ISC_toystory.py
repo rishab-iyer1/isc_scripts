@@ -10,7 +10,6 @@ import numpy as np
 from nilearn.plotting import plot_stat_map
 from scipy.stats import zscore
 from statsmodels.stats.multitest import multipletests
-from tqdm import tqdm
 
 from isc_standalone import (isc, bootstrap_isc, compute_summary_statistic, load_images,
                             load_boolean_mask, mask_images,
@@ -26,7 +25,7 @@ from isc_standalone import (isc, bootstrap_isc, compute_summary_statistic, load_
 #                                                             'for example MNI152_T1_2mm_brain_mask.nii.gz')
 data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
 data_dir_mask = '/Volumes/BCI/Ambivalent_Affect/rois'
-data_dir_mni = '~/Downloads'
+data_dir_mni = '/Volumes/BCI/Ambivalent_Affect'
 
 # Filenames for MRI data; gzipped NIfTI images (.nii.gz)
 # func_fns = glob(join(data_dir, ('sub-*_task-pieman_space-MNI152NLin2009cAsym'
@@ -60,6 +59,7 @@ else:
 
 
 if not os.path.exists('../data/z_scored_data.npy'):  # only runs all this code if the data isn't in current directory
+
     # Load functional images and masks using brainiak.io
     func_imgs = load_images(func_fns)
     # print("Using the following functional files", func_imgs)
@@ -213,13 +213,12 @@ nib.save(isc_nii, isc_fn)
 
 """  # raw mean isc without stats
 
-n_bootstraps = 10000
-if not os.path.exists(f'../data/isc_thresh_pieman_n{iscs.shape[0]}_bootstrap{n_bootstraps}.nii.gz'):
+if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz'):
     # Run bootstrap hypothesis test on ISCs
-    observed, ci, p, distribution = tqdm(bootstrap_isc(iscs, pairwise=False,
+    observed, ci, p, distribution = bootstrap_isc(iscs, pairwise=False,
                                                   ci_percentile=95,
                                                   summary_statistic='median',
-                                                  n_bootstraps=n_bootstraps))
+                                                  n_bootstraps=10)
 
     # Get number of NaN voxels
     n_nans = np.sum(np.isnan(observed))
@@ -246,12 +245,12 @@ if not os.path.exists(f'../data/isc_thresh_pieman_n{iscs.shape[0]}_bootstrap{n_b
     # Reinsert thresholded ISCs back into whole brain image
     isc_thresh = np.full(observed.shape, np.nan)
     isc_thresh[nonnan_coords] = nonnan_isc
-    nib.save(isc_thresh, '../data/isc_group')
 
     # Create empty 3D image and populate
     # with thresholded ISC values
     isc_img = np.full(ref_nii.shape, np.nan)
     isc_img[mask_coords] = isc_thresh
+
     # Convert to NIfTI image
     isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
 
@@ -268,6 +267,7 @@ if not os.path.exists(f'../data/isc_thresh_pieman_n{iscs.shape[0]}_bootstrap{n_b
         cmap='RdYlBu_r',
         vmax=.5,
         cut_coords=(0, -65, 40))
+    plt.show()
 
     # Plot slices at coordinates -61, -20, 8
     plot_stat_map(
@@ -284,13 +284,7 @@ if not os.path.exists(f'../data/isc_thresh_pieman_n{iscs.shape[0]}_bootstrap{n_b
         vmax=.5,
         threshold=.1,
         cut_coords=(0, -65, 40))
-    plt.show()
 
     # Save final ISC NIfTI image as .nii
-    isc_fn = f'../data/isc_thresh_pieman_n{iscs.shape[0]}_bootstrap{n_bootstraps}.nii.gz'
+    isc_fn = 'isc_thresh_pieman_n20.nii.gz'
     nib.save(isc_nii, isc_fn)
-
-
-else:
-    print("Loading group ISC from file...")
-    isc_nii = nib.load(f'../data/isc_thresh_pieman_n{iscs.shape[0]}_bootstrap{n_bootstraps}.nii.gz')

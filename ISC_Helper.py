@@ -15,6 +15,7 @@ from typing import Dict, List
 
 # from pandas.core.common import random_state
 from tqdm.auto import tqdm
+import time
 
 import nibabel as nib
 import numpy as np
@@ -25,6 +26,37 @@ from scipy.stats import pearsonr
 # from ISC.scripts.sliding_isc import roi_selected
 from isc_standalone import isc, phase_randomize, _check_timeseries_input, compute_summary_statistic, p_from_null, \
     MAX_RANDOM_SEED
+
+
+def profile_function(func):
+    import cProfile
+    import pstats
+    import io
+    from functools import wraps
+
+    @wraps(func)  # Ensures the wrapped function retains its name and docstring
+    def wrapper(*args, **kwargs):
+        # Initialize the profiler
+        pr = cProfile.Profile()
+        pr.enable()
+
+        # Call the actual function
+        result = func(*args, **kwargs)
+
+        # Stop profiling
+        pr.disable()
+
+        # Output profiling results to a string or file
+        s = io.StringIO()
+        ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+        ps.print_stats()
+        
+        # Print the profiling results (or save them to a file)
+        print(s.getvalue())  # You can replace this with writing to a file if needed
+
+        return result
+
+    return wrapper
 
 
 def get_rois(all_roi_fpaths) -> Dict[str, NiftiMasker]:
@@ -78,7 +110,7 @@ def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: Li
             np.save(bold_path, bold_roi[-1])
         else:
             bold_roi.append(np.load(bold_path))
-            print(f"subj #{n}: {subj_id} loaded from file")
+            print(f"ROI {roi}, subj #{n}: {subj_id} loaded from file")
 
     assert all([bold_roi[0].shape == bold_roi[i].shape for i in
                 range(1, len(bold_roi))]), "dimensions are not consistent"  # check that all the dimensions are the same
@@ -228,12 +260,49 @@ def phaseshift_sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, Ni
     return iscs_roi_selected
 
 
+def phaseshift_sliding_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker], func_fns, n_trs: int,
+                           data_path: str, avg_over_roi=True, spatial=False, pairwise=False,
+                           summary_statistic='median', tolerate_nans=True, random_state=None, n_shifts=1000, window_size=30, step_size=5):
+    """
+    Given functional data of shape (n_TRs, n_voxels, n_subjects), computes sliding window ISC for the selected ROIs.
+    :param roi_selected: list of all rois to compute ISC over
+    :param all_roi_masker: a dictionary with roi name (keys) mapped to NiftiMasker object (values)
+    :param func_fns: file names of all functional data
+    :param data_path: path to save loaded ROI data
+    :param avg_over_roi: whether to average the time series over the ROI before computing ISC
+    :param spatial: whether to compute spatial ISC (default: temporal)
+    :param pairwise: whether to compute pairwise ISC (default: group)
+    :param summary_statistic: Which summary statistic to use: mean or median (default: None)
+    :param tolerate_nans: Whether to tolerate NaNs (default: True)
+    :param random_state:
+    :param n_shifts:
+    :param n_trs: number of TRs in ISC data
+    :param window_size: number of TRs in each window
+    :param step_size: number of TRs to move the window by
+    :return: iscs_roi_selected: a dictionary with roi name (keys) mapped to isc values (values)
+    """
+    iscs_roi_selected = {}
+    for j, roi_name in (roi_log := tqdm(enumerate(roi_selected), leave=True, position=0, ascii=True)):
+        roi_log.set_description(f"Computing ISC for {roi_name}")
+        # Load data
+        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns, data_path)  # shape (n_TRs, n_voxels, n_subjects)
+
+        iscs_roi_selected[roi_name] = _compute_phaseshift_sliding_isc(bold_roi, n_trs=n_trs, window_size=window_size,
+                                                                      step_size=step_size,
+                                                                      avg_over_roi=avg_over_roi, spatial=spatial,
+                                                                      pairwise=pairwise,
+                                                                      summary_statistic=summary_statistic,
+                                                                      n_shifts=n_shifts,
+                                                                      tolerate_nans=tolerate_nans,
+                                                                      random_state=random_state)
+    return iscs_roi_selected
+
 
 
 def _permutation_task(i, data, n_trs, window_size, step_size, avg_over_roi, spatial,
                       pairwise, summary_statistic, tolerate_nans, random_state):
     """Helper function to handle the permutation task."""
-    print('Using process', os.getpid())
+    # print('Using process', os.getpid())
     prng = np.random.RandomState(random_state)
     shifted_data = phase_randomize(data, random_state=prng)
 
@@ -295,6 +364,7 @@ def _compute_phaseshift_sliding_isc_parallel(data, n_trs, window_size, step_size
 
     return observed, p, distribution
 
+# @profile_function
 def _compute_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True, spatial=False, pairwise=False,
                          summary_statistic='median', tolerate_nans=True):
     """
@@ -319,10 +389,9 @@ def _compute_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True,
         if spatial:
             data_window = np.transpose(data_window, [1, 0, 2])  # becomes (n_voxels, window_size, n_subjects)
         slide_isc.append(isc(data_window, pairwise=pairwise, summary_statistic=summary_statistic, tolerate_nans=tolerate_nans))
-
     return np.array(slide_isc)
 
-
+# @profile_function
 def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True, spatial=False,
                                     pairwise=False,
                                     summary_statistic='median', n_shifts=1000, tolerate_nans=True, random_state=None):
@@ -363,7 +432,8 @@ def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_ove
     distribution : ndarray, time-shifts by voxels (optional)
         Time-shifted null distribution if return_bootstrap=True
     """
-
+    # start = time.perf_counter()
+    # print('using process', os.getpid())
     # Check response time series input format
     data, n_TRs, n_voxels, n_subjects = _check_timeseries_input(data)
 
@@ -373,7 +443,8 @@ def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_ove
 
     # Iterate through randomized shifts to create null distribution
     distribution = []
-    for i in tqdm(np.arange(n_shifts), position=0, leave=True):
+    # for i in tqdm(np.arange(n_shifts), position=0, leave=True):
+    for i in np.arange(n_shifts):
         # Random seed to be deterministically re-randomized at each iteration
         if isinstance(random_state, np.random.RandomState):
             prng = random_state
@@ -423,7 +494,7 @@ def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_ove
     p = p_from_null(observed, distribution,
                     side='two-sided', exact=False,
                     axis=0)
-
+    # print('completed in', time.perf_counter() - start)
     return observed, p, distribution
 
 
