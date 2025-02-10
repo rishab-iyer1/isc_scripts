@@ -1,0 +1,157 @@
+"""
+ISC with sliding window to capture variations in relationship between ISC and emotional report
+"""
+
+import os
+import pickle
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import cProfile
+import time
+from glob import glob
+from os.path import join
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from isc_standalone import p_from_null
+from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data
+
+# -------------------------------
+# Parameters
+# -------------------------------
+task = 'onesmallstep'
+roi_selected = ['visualcortex', 'auditory', 'vmPFC', 'ACC', 'PCC', 'insula', 'amygdala', 'NA']
+# roi_selected = ['PCC', 'ACC']
+emotions = ['P', 'N', 'M', 'X', 'Cry']  # Positive, Negative, Mixed, Neutral
+avg_over_roi = True
+spatial = False
+pairwise = False
+random_state = None
+window_size = 30
+step_size = 5
+if task == 'toystory':
+    n_trs = 274
+    n_shifts = 10000
+elif task == 'onesmallstep':
+    n_trs = 454
+    n_shifts = 10000
+else:
+    raise Exception('task not defined')
+n_windows = int((n_trs - window_size) / step_size) + 1
+batch_size = 16
+
+smooth = 'smooth'
+avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
+spatial_name = "spatial" if spatial else "temporal"
+pairwise_name = "pairwise" if pairwise else "group"
+
+# -------------------------------
+# File paths
+# -------------------------------
+if task == 'toystory':
+    data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data/ToyStoryNuisanceRegressed'
+elif task == 'onesmallstep':
+    data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
+else:
+    raise ValueError('Invalid task')
+func_fns = glob(join(data_dir_func, 'P?.nii.gz')) + glob(join(data_dir_func, 'N?.nii.gz')) + \
+           glob(join(data_dir_func, 'VR?.nii.gz')) + glob(join(data_dir_func, 'P??.nii.gz')) + \
+           glob(join(data_dir_func, 'N??.nii.gz')) + glob(join(data_dir_func, 'VR??.nii.gz'))
+
+if task == 'toystory':
+    # remove VR7 and 8 temporarily for testing because they are 295 not 300 TRs
+    func_fns = [fn for fn in func_fns if 'VR7' not in fn and 'VR8' not in fn]
+    label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Toy_Story_Labelled'
+elif task == 'onesmallstep':
+    label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/OSS_Labelled'
+
+subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]  # assume BIDS format
+subj_ids.sort()
+
+roi_mask_path = '/Volumes/BCI/Ambivalent_Affect/rois'
+all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
+all_roi_masker = get_rois(all_roi_fpaths)
+data_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/data/{task}'
+figure_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/figures/{task}'
+isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
+           f"window{window_size}_step{step_size}.pkl"
+sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}"
+
+# -------------------------------
+# Compute and save ISC
+# -------------------------------
+
+def unpack_and_call(func, kwargs):
+    return func(**kwargs)
+
+
+if __name__ == '__main__':
+    # roi_selected = roi_selected[1:]
+    save_path = f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"
+    if not os.path.exists(save_path):
+        print("permutation path doesn't exist, computing...")
+        from itertools import repeat
+        start = time.perf_counter()
+        with ThreadPoolExecutor() as executor:
+            bold_roi = executor.map(load_roi_data, roi_selected, repeat(all_roi_masker), repeat(func_fns), repeat(data_path))  # repeat is used to pass the parameter to each iteration in map(). the 
+
+        end = time.perf_counter()
+        print(f"Data loaded in {end-start:.3f} sec")
+                
+        n_shifts_batch = int(n_shifts/batch_size)
+        iscs_roi_selected = dict(zip(roi_selected, [[] for _ in range(len(roi_selected))]))
+        with cProfile.Profile() as profile:
+            for i, roi in enumerate(bold_roi):
+                print(f'starting permutations for {roi_selected[i]}')
+
+                # Start timing
+                start_time = time.time()
+                with ThreadPoolExecutor() as executor:
+                    futures = []
+                    for n_batch in (pbar := tqdm([n_shifts_batch]*batch_size)):
+                        futures.append(executor.submit(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
+                                                                            step_size=step_size,
+                                                                            avg_over_roi=avg_over_roi, spatial=spatial,
+                                                                            pairwise=pairwise,
+                                                                            summary_statistic='median',
+                                                                            n_shifts=n_batch,
+                                                                            tolerate_nans=True,
+                                                                            random_state=random_state))
+
+                    for future in tqdm(as_completed(futures), total=len(futures)):
+                        try:
+                            iscs_roi_selected[roi_selected[i]].append(future.result())
+                            pbar.update(1)
+                        except Exception as e:
+                            print(f"Task generated an exception: {e}")
+
+                # Print how long the executor took
+                print(f"Executor submit and as_completed took {time.time() - start_time:.2f} seconds")
+            # results = pstats.Stats(profile)
+            # results.sort_stats(pstats.SortKey.TIME)
+            # results.print_stats()
+
+        # print(iscs_roi_selected['visualcortex'][0][0].shape, iscs_roi_selected['visualcortex'][0][1].shape, iscs_roi_selected['visualcortex'][0][2].shape)
+        # print(iscs_roi_selected['visualcortex'][1][0].shape, iscs_roi_selected['visualcortex'][1][1].shape, iscs_roi_selected['visualcortex'][1][2].shape)
+        # print(iscs_roi_selected['auditory'][0][0].shape, iscs_roi_selected['auditory'][0][1].shape, iscs_roi_selected['auditory'][0][2].shape)
+        # print(iscs_roi_selected['auditory'][1][0].shape, iscs_roi_selected['auditory'][1][1].shape, iscs_roi_selected['auditory'][1][2].shape)
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois", 'wb') as f:
+            pickle.dump(iscs_roi_selected, f)
+        
+        # after parallelizing, the n batches are in n separate elements of phase_slide_isc; recombine them so that we have one nparray of observed, p, distribution for each roi
+        x = {roi: [np.empty(shape=(n_windows, 1)), np.empty(shape=(n_windows, 1)), np.empty(shape=(n_shifts, n_windows, 1))] for roi in roi_selected} # init empty dict with appropriate shapes
+        for roi in roi_selected:
+            # joining the batched distributions
+            dist = []
+            for i in range(batch_size):  # number of loops = number of batches
+                assert np.all(iscs_roi_selected[roi][0][0] == iscs_roi_selected[roi][i][0])  # make sure the "observed" is the same - should never change across batches
+                dist.append(iscs_roi_selected[roi][i][2])
+
+            x[roi][0] = iscs_roi_selected[roi][0][0]  # take one of the "observed" ISC matrices since we asserted that they're all the same
+            x[roi][2] = np.concatenate(dist)  # concatenate all n_shifts permutations
+            x[roi][1] = p_from_null(x[roi][0], x[roi][2], side='two-sided', exact=False, axis=0)  # need to re-calculate p-values after concatenating permutations
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'wb') as f:
+                pickle.dump(x, f)
+                print('saved permutations to', f)
+
+    else:
+        print(f"File already exists: \n{save_path}")
