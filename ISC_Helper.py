@@ -154,7 +154,7 @@ def compute_isc(roi_selected: List[str], all_roi_masker: Dict[str, NiftiMasker],
 
 # def plot_spatial_isc(roi_selected: List[str]):
 #     """
-#     Creates a timeseries plot of spatial correlation on the y-axis vs. TRs on the isc_wholebrain-axis.
+#     Creates a timeseries plot of spatial correlation on the y-axis vs. TRs on the x-axis.
 #     Each ROI selected generates a new subplot in the image.
 #     :param roi_selected: list of all rois to compute ISC over
 #     :return: displays the plot
@@ -398,8 +398,8 @@ def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_ove
     """Phase randomization for one-sample ISC test
     Parameters
     ----------
-    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
-        fMRI data for which to compute ISFC
+    data : list or ndarray (n_TRs x n_voxels x n_subjects)
+        fMRI data for which to compute ISC
 
     n_trs :
     window_size :
@@ -532,6 +532,53 @@ def permute_isc_behav(isc_data: np.ndarray, behav: np.ndarray, n_perm: int,
         print("Permutation results loaded from file.")
 
     return perm
+
+
+def print_stats(data):
+    print("NaN count in data:", np.isnan(data).sum())
+    print("Inf count in data:", np.isinf(data).sum())
+    print("Max value in data:", np.nanmax(data))
+    print("Min value in data:", np.nanmin(data))
+    print("Shape:", data.shape)
+
+
+def parcellate_bold(data, n_parcels, masked_parc):
+    # data = [x for x in bold_roi]
+    # data = data[0]
+    print(data.shape)
+    data = np.nan_to_num(data, nan=0.0)  # replace nan with 0
+    data = np.clip(data, -1e6, 1e6)  # clip max and min values
+    from scipy.stats import zscore
+    # data = zscore(data, axis=0)
+    
+    all_parcel_data = []
+    # n_parcels = 1000
+    # Initialize output (timepoints, parcels, subjects)
+    parcel_ts = np.zeros((data.shape[0], n_parcels, data.shape[2]))
+    
+    # Loop over each subject independently
+    for subj_idx in range(data.shape[2]):
+        for parcel_id in range(1, n_parcels + 1):
+            parcel_voxels = np.where(masked_parc == parcel_id)[0]
+            if parcel_voxels.size > 0:
+                parcel_ts[:, parcel_id - 1, subj_idx] = np.mean(data[:, parcel_voxels, subj_idx], axis=1)
+    
+    all_parcel_data.append(parcel_ts)  # Shape: (454, 1000, 27)
+    
+    all_parcel_data = np.array(all_parcel_data)[0]  # Shape: (num_subjects, 454, 1000, 27)
+    print_stats(all_parcel_data)
+    all_parcel_data = zscore(all_parcel_data, axis=0)
+    print_stats(all_parcel_data)
+    return all_parcel_data
+
+def load_schaeffer1000(parc_path, mask_path):
+    parc = nib.load(parc_path)
+    # print(parc.get_fdata().flatten().shape)
+    mask = np.load(mask_path)
+    assert np.all(parc.shape == mask.shape)
+    masked_parc = parc.get_fdata().flatten()[mask.flatten()]
+    # print(masked_parc.shape)
+    return masked_parc
 
 
 def main():

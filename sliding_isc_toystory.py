@@ -13,16 +13,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from isc_standalone import p_from_null
-from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data
+from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data, parcellate_bold, load_schaeffer1000
 
 # -------------------------------
 # Parameters
 # -------------------------------
 task = 'onesmallstep'
-roi_selected = ['visualcortex', 'auditory', 'vmPFC', 'ACC', 'PCC', 'insula', 'amygdala', 'NA']
-# roi_selected = ['PCC', 'ACC']
-emotions = ['P', 'N', 'M', 'X', 'Cry']  # Positive, Negative, Mixed, Neutral
-avg_over_roi = True
+# roi_selected = ['visualcortex', 'auditory', 'vmPFC', 'ACC', 'PCC', 'insula', 'amygdala', 'NA']
+roi_selected = ['wholebrain']
+# emotions = ['P', 'N', 'M', 'X', 'Cry']  # Positive, Negative, Mixed, Neutral, Cry
+emotions = ['P', 'N', 'M']
+parcellate = True
+avg_over_roi = False
 spatial = False
 pairwise = False
 random_state = None
@@ -30,14 +32,14 @@ window_size = 30
 step_size = 5
 if task == 'toystory':
     n_trs = 274
-    n_shifts = 10000
+    n_shifts = 1024
 elif task == 'onesmallstep':
     n_trs = 454
-    n_shifts = 10000
+    n_shifts = 12
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 16
+batch_size = 4
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -72,9 +74,16 @@ all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
 all_roi_masker = get_rois(all_roi_fpaths)
 data_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/data/{task}'
 figure_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/figures/{task}'
+parc_path = f"{data_path}/../rois/schaefer_2018/Schaefer2018_1000Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
+mask_path = f"{data_path}/mask_img.npy"
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
 sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}"
+if parcellate:
+    sliding_perm_path += "parcellated"
+    n_parcels = 1000
+    masked_parc = load_schaeffer1000(parc_path, mask_path)
+
 
 # -------------------------------
 # Compute and save ISC
@@ -96,11 +105,15 @@ if __name__ == '__main__':
 
         end = time.perf_counter()
         print(f"Data loaded in {end-start:.3f} sec")
-                
+        
         n_shifts_batch = int(n_shifts/batch_size)
         iscs_roi_selected = dict(zip(roi_selected, [[] for _ in range(len(roi_selected))]))
         with cProfile.Profile() as profile:
             for i, roi in enumerate(bold_roi):
+                if parcellate: 
+                    roi = parcellate_bold(roi, n_parcels, masked_parc)
+                    print(roi.shape)
+
                 print(f'starting permutations for {roi_selected[i]}')
 
                 # Start timing
