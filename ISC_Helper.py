@@ -573,11 +573,9 @@ def parcellate_bold(data, n_parcels, masked_parc):
 
 def load_schaeffer1000(parc_path, mask_path):
     parc = nib.load(parc_path)
-    # print(parc.get_fdata().flatten().shape)
     mask = np.load(mask_path)
     assert np.all(parc.shape == mask.shape)
     masked_parc = parc.get_fdata().flatten()[mask.flatten()]
-    # print(masked_parc.shape)
     return masked_parc
 
 
