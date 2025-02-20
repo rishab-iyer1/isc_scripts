@@ -119,7 +119,7 @@ def isc(data, pairwise=False, summary_statistic=None, tolerate_nans=True):
 
     Parameters
     ----------
-    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : list or ndarray (n_TRs x n_voxels x n_subjects)
         fMRI data for which to compute ISC
 
     pairwise : bool, default: False
@@ -259,10 +259,10 @@ def isfc(data, targets=None, pairwise=False, summary_statistic=None,
 
     Parameters
     ----------
-    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : list or ndarray (n_TRs x n_voxels x n_subjects)
         fMRI data for which to compute ISFC
 
-    targets : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects), optional
+    targets : list or ndarray (n_TRs x n_voxels x n_subjects), optional
         fMRI data to use as targets for ISFC
 
     pairwise : bool, default: False
@@ -438,15 +438,15 @@ def _check_targets_input(targets, data):
 
     Parameters
     ----------
-    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : list or ndarray (n_TRs x n_voxels x n_subjects)
         fMRI data for which to compute ISFC
 
-    targets : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    targets : list or ndarray (n_TRs x n_voxels x n_subjects)
         fMRI data to use as targets for ISFC
 
     Returns
     -------
-    targets : ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    targets : ndarray (n_TRs x n_voxels x n_subjects)
         ISFC targets with standadized structure
 
     n_TRs : int
@@ -533,8 +533,8 @@ def squareform_isfc(isfcs, iscs=None):
     If input is a 2- or 3-dimensional array of square ISFC matrices, converts
     this to the condensed off-diagonal ISFC values (i.e., the vectorized
     triangle) and the diagonal ISC values. In this case, input must be a
-    single array of shape either n_voxels isc_wholebrain n_voxels or n_subjects (or
-    n_pairs) isc_wholebrain n_voxels isc_wholebrain n_voxels. The condensed ISFC values are vectorized
+    single array of shape either n_voxels x n_voxels or n_subjects (or
+    n_pairs) x n_voxels x n_voxels. The condensed ISFC values are vectorized
     according to scipy.spatial.distance.squareform, yielding n_voxels *
     (n_voxels - 1) / 2 values comprising every voxel pair. Alternatively, if
     input is an array of condensed off-diagonal ISFC values and an array of
@@ -603,7 +603,7 @@ def _threshold_nans(data, tolerate_nans):
 
     Parameters
     ----------
-    data : ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : ndarray (n_TRs x n_voxels x n_subjects)
         fMRI time series data
 
     tolerate_nans : bool or float (0.0 <= threshold <= 1.0)
@@ -611,7 +611,7 @@ def _threshold_nans(data, tolerate_nans):
 
     Returns
     -------
-    data : ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : ndarray (n_TRs x n_voxels x n_subjects)
         fMRI time series data with adjusted NaNs
 
     nan_mask : ndarray (n_voxels,)
@@ -1279,7 +1279,7 @@ def timeshift_isc(data, pairwise=False, summary_statistic='median',
 
     Parameters
     ----------
-    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : list or ndarray (n_TRs x n_voxels x n_subjects)
         fMRI data for which to compute ISFC
 
     pairwise : bool, default: False
@@ -1427,7 +1427,7 @@ def phaseshift_isc(data, pairwise=False, summary_statistic='median',
 
     Parameters
     ----------
-    data : list or ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : list or ndarray (n_TRs x n_voxels x n_subjects)
         fMRI data for which to compute ISFC
 
     pairwise : bool, default: False
@@ -1544,7 +1544,7 @@ def phase_randomize(data, voxelwise=False, random_state=None):
 
     Parameters
     ----------
-    data : ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    data : ndarray (n_TRs x n_voxels x n_subjects)
         Data to be phase randomized (per subject)
 
     voxelwise : bool, default: False
@@ -1556,7 +1556,7 @@ def phase_randomize(data, voxelwise=False, random_state=None):
 
     Returns
     ----------
-    shifted_data : ndarray (n_TRs isc_wholebrain n_voxels isc_wholebrain n_subjects)
+    shifted_data : ndarray (n_TRs x n_voxels x n_subjects)
         Phase-randomized time series
     """
 
@@ -1761,7 +1761,7 @@ def array_correlation(x, y, axis=0):
         Array of observations for one or more variables
 
     y : 1D or 2D ndarray
-        Array of observations for one or more variables (same shape as isc_wholebrain)
+        Array of observations for one or more variables (same shape as x)
 
     axis : int (0 or 1), default: 0
         Correlation between columns (axis=0) or rows (axis=1)
@@ -1844,7 +1844,7 @@ def load_boolean_mask(path: Union[str, Path],
         Mask path.
     predicate
         Callable used to create boolean values, e.g. a threshold function
-        ``lambda isc_wholebrain: isc_wholebrain > 50``.
+        ``lambda x: x > 50``.
 
     Returns
     -------
@@ -1853,11 +1853,11 @@ def load_boolean_mask(path: Union[str, Path],
     """
     if not isinstance(path, str):
         path = str(path)
-    data = nib.load(path).get_data()
+    data = nib.load(path).get_fdata()
     if predicate is not None:
         mask = predicate(data)
     else:
-        mask = data.astype(np.bool)
+        mask = data.astype(bool)
     return mask
 
 
