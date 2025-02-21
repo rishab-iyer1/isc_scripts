@@ -35,11 +35,11 @@ if task == 'toystory':
     n_shifts = 1024
 elif task == 'onesmallstep':
     n_trs = 454
-    n_shifts = 12
+    n_shifts = 1024
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 4
+batch_size = 16
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -80,6 +80,7 @@ isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_
            f"window{window_size}_step{step_size}.pkl"
 sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}"
 if parcellate:
+    assert avg_over_roi is False
     sliding_perm_path += "parcellated"
     n_parcels = 1000
     masked_parc = load_schaeffer1000(parc_path, mask_path)
