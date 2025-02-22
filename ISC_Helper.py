@@ -576,23 +576,23 @@ def load_schaeffer1000(parc_path, mask_path):
     mask = np.load(mask_path)
     assert np.all(parc.shape == mask.shape)
     masked_parc = parc.get_fdata().flatten()[mask.flatten()]
-    return masked_parc
+    return parc, masked_parc
 
 
-def parcel_to_nifti(nii_shape, n_parcels, parc_nii, input_data, affine, saving=False, save_path=None):
+def parcel_to_nifti(parc, n_parcels, input_data, saving=False, save_path=None):
     """
     Given an np array, convert to a nifti map. Useful for visualizing data as a nifti file. 
-    :param nii_shape: 3D or 4D tuple that determines the shape of the nifti file
+    :param parc: parcellation as a nifti object
     """
     if saving: 
         assert save_path is not None, "No save path provided"
 
-    img = np.zeros(nii_shape)
+    img = np.zeros(parc.shape)
     for p in range(1, n_parcels + 1):
-        mask = parc_nii.get_fdata() == p  # location of current parcel
+        mask = parc.get_fdata() == p  # location of current parcel
         img[mask, :] = input_data[:, p - 1].T
 
-    nifti = nib.Nifti1Image(img, affine)
+    nifti = nib.Nifti1Image(img, parc.affine)
     if saving:
         nib.save(nifti, save_path)
     return nifti
