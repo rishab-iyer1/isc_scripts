@@ -24,8 +24,9 @@ from isc_standalone import (isc, bootstrap_isc, compute_summary_statistic, load_
 # parser.add_argument('--data_dir_mni', type=str, description='Path to wholebrain mask, '
 #                                                             'for example MNI152_T1_2mm_brain_mask.nii.gz')
 data_dir_func = '/jukebox/norman/rsiyer/isc/toystory/nuisance_regressed_cut'
-data_dir_mask = '/jukebox/norman/rsiyer/isc/toystory/rois'
+data_dir_mask = '/jukebox/norman/rsiyer/isc/isc_scripts/rois'
 data_dir_mni = '/jukebox/norman/rsiyer/isc/toystory'
+output_dir = '/jukebox/norman/rsiyer/isc/outputs/toystory/data'
 
 # Filenames for MRI data; gzipped NIfTI images (.nii.gz)
 # func_fns = glob(join(data_dir, ('sub-*_task-pieman_space-MNI152NLin2009cAsym'
@@ -36,255 +37,255 @@ func_fns = glob(join(data_dir_func, 'P?.nii.gz')) + glob(join(data_dir_func, 'N?
 mask_fn = join(data_dir_mask, 'wholebrain.nii.gz')
 mni_fn = join(data_dir_mni, 'MNI152_T1_2mm_brain_mask.nii.gz')
 
-if not os.path.exists('../data/ref_nii.nii.gz'):
-    # Load a NIfTI of the brain mask as a reference Nifti1Image
-    ref_nii = nib.load(mask_fn)
-    nib.save(ref_nii, '../data/ref_nii.nii.gz')
-else:
-    ref_nii = nib.load('../data/ref_nii.nii.gz')
+# if not os.path.exists('../data/ref_nii.nii.gz'):
+#     # Load a NIfTI of the brain mask as a reference Nifti1Image
+#     ref_nii = nib.load(mask_fn)
+#     nib.save(ref_nii, '../data/ref_nii.nii.gz')
+# else:
+#     ref_nii = nib.load('../data/ref_nii.nii.gz')
 
-if not os.path.exists('../data/mask_img.npy'):
+if not os.path.exists(f'{output_dir}/mask_img.npy'):
     mask_img = load_boolean_mask(mask_fn)
-    np.save('../data/mask_img.npy', mask_img)
-else:
-    mask_img = np.load('../data/mask_img.npy')
+    np.save(f'{output_dir}/mask_img.npy', mask_img)
+# else:
+#     mask_img = np.load('../data/mask_img.npy')
 
 
-if not os.path.exists('../data/mask_coords.npy'):
-    # Get coordinates of mask voxels in original image
-    mask_coords = np.where(mask_img)
-    np.save('../data/mask_coords.npy', mask_coords)
-else:
-    mask_coords = np.load('../data/mask_coords.npy')
+# if not os.path.exists('../data/mask_coords.npy'):
+#     # Get coordinates of mask voxels in original image
+#     mask_coords = np.where(mask_img)
+#     np.save('../data/mask_coords.npy', mask_coords)
+# else:
+#     mask_coords = np.load('../data/mask_coords.npy')
 
 
-if not os.path.exists('../data/z_scored_data.npy'):  # only runs all this code if the data isn't in current directory
+# if not os.path.exists('../data/z_scored_data.npy'):  # only runs all this code if the data isn't in current directory
 
-    # Load functional images and masks using brainiak.io
-    func_imgs = load_images(func_fns)
-    # print("Using the following functional files", func_imgs)
+#     # Load functional images and masks using brainiak.io
+#     func_imgs = load_images(func_fns)
+#     # print("Using the following functional files", func_imgs)
 
-    # Apply the brain mask using brainiak.image
-    masked_imgs = mask_images(func_imgs, mask_img)
+#     # Apply the brain mask using brainiak.image
+#     masked_imgs = mask_images(func_imgs, mask_img)
 
-    # Collate data into a single TR isc_wholebrain voxel isc_wholebrain subject array
-    data = MaskedMultiSubjectData.from_masked_images(masked_imgs, len(func_fns))
+#     # Collate data into a single TR isc_wholebrain voxel isc_wholebrain subject array
+#     data = MaskedMultiSubjectData.from_masked_images(masked_imgs, len(func_fns))
 
-    print(f"Trimmed fMRI data shape: {data.shape} "
-          f"\ni.e., {data.shape[0]} time points, {data.shape[1]} voxels, "
-          f"{data.shape[2]} subjects")
+#     print(f"Trimmed fMRI data shape: {data.shape} "
+#           f"\ni.e., {data.shape[0]} time points, {data.shape[1]} voxels, "
+#           f"{data.shape[2]} subjects")
 
-    # Z-score time series for each voxel
-    data = zscore(data, axis=0)
+#     # Z-score time series for each voxel
+#     data = zscore(data, axis=0)
 
-    # store z-scored data as a np file for faster reload, shouldn't run this again
-    np.save('../data/z_scored_data.npy', data)
-else:
-    data = np.load('../data/z_scored_data.npy')
-
-
-if not os.path.exists('../data/raw_isc.npy'):
-    # Leave-one-out approach
-    iscs = isc(data, pairwise=False, tolerate_nans=.8)
-    np.save('../data/raw_isc.npy', iscs)
-else:
-    iscs = np.load('../data/raw_isc.npy')
-
-# Check shape of output ISC values
-print(f"ISC values shape = {iscs.shape} \ni.e., {iscs.shape[0]} "
-      f"left-out subjects and {iscs.shape[1]} voxel(s)")
-
-if not os.path.exists('../data/mean_isc.npy'):
-    # Compute mean ISC (with Fisher transformation)
-    mean_iscs = compute_summary_statistic(iscs, summary_statistic='mean', axis=0)
-    np.save('../data/mean_isc.npy', mean_iscs)
-else:
-    mean_iscs = np.load('../data/mean_isc.npy')
+#     # store z-scored data as a np file for faster reload, shouldn't run this again
+#     np.save('../data/z_scored_data.npy', data)
+# else:
+#     data = np.load('../data/z_scored_data.npy')
 
 
-print(f"ISC values shape = {mean_iscs.shape} \ni.e., {mean_iscs.shape[0]} "
-      f"mean value across left-out subjects and {iscs.shape[1]} voxel(s)"
-      f"\nMinimum mean ISC across voxels = {np.nanmin(mean_iscs):.3f}; "
-      f"maximum mean ISC across voxels = {np.nanmax(mean_iscs):.3f}")
+# if not os.path.exists('../data/raw_isc.npy'):
+#     # Leave-one-out approach
+#     iscs = isc(data, pairwise=False, tolerate_nans=.8)
+#     np.save('../data/raw_isc.npy', iscs)
+# else:
+#     iscs = np.load('../data/raw_isc.npy')
 
-if not os.path.exists('../data/median_isc.npy'):
-    # Compute median ISC
-    median_iscs = compute_summary_statistic(iscs, summary_statistic='median', axis=0)
-    np.save('../data/median_isc.npy', median_iscs)
-else:
-    median_iscs = np.load('../data/median_isc.npy')
+# # Check shape of output ISC values
+# print(f"ISC values shape = {iscs.shape} \ni.e., {iscs.shape[0]} "
+#       f"left-out subjects and {iscs.shape[1]} voxel(s)")
 
-print(f"ISC values shape = {median_iscs.shape} \ni.e., {median_iscs.shape[0]} "
-      f"median value across left-out subjects and {iscs.shape[1]} voxel(s)"
-      f"\nMinimum median ISC across voxels = {np.nanmin(median_iscs):.3f}; "
-      f"maximum median ISC across voxels = {np.nanmax(median_iscs):.3f}")
+# if not os.path.exists('../data/mean_isc.npy'):
+#     # Compute mean ISC (with Fisher transformation)
+#     mean_iscs = compute_summary_statistic(iscs, summary_statistic='mean', axis=0)
+#     np.save('../data/mean_isc.npy', mean_iscs)
+# else:
+#     mean_iscs = np.load('../data/mean_isc.npy')
 
-"""
-# unthresholded values based on median ISC
-isc_nonthresh_median = np.full(median_iscs.shape, np.nan)
-n_nans = np.sum(np.isnan(median_iscs))
-print(f"{n_nans} voxels out of {median_iscs.shape[0]} are NaNs "
-      f"({n_nans / median_iscs.shape[0] * 100:.2f}%)")
 
-nonnan_mask = ~np.isnan(median_iscs)
-nonnan_coords = np.where(nonnan_mask)
+# print(f"ISC values shape = {mean_iscs.shape} \ni.e., {mean_iscs.shape[0]} "
+#       f"mean value across left-out subjects and {iscs.shape[1]} voxel(s)"
+#       f"\nMinimum mean ISC across voxels = {np.nanmin(mean_iscs):.3f}; "
+#       f"maximum mean ISC across voxels = {np.nanmax(mean_iscs):.3f}")
 
-nonnan_isc = median_iscs[nonnan_mask]
-isc_nonthresh_median[nonnan_coords] = nonnan_isc
-isc_img = np.full(ref_nii.shape, np.nan)
-isc_img[mask_coords] = isc_nonthresh_median
-isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
+# if not os.path.exists('../data/median_isc.npy'):
+#     # Compute median ISC
+#     median_iscs = compute_summary_statistic(iscs, summary_statistic='median', axis=0)
+#     np.save('../data/median_isc.npy', median_iscs)
+# else:
+#     median_iscs = np.load('../data/median_isc.npy')
 
-# Plot slices at coordinates -61, -20, 8
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    cut_coords=(-61, -20, 8))
-# Plot slices at coordinates 0, -65, 40
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    cut_coords=(0, -65, 40))
-plt.show()
-# Plot slices at coordinates -61, -20, 8
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    threshold=.1,
-    cut_coords=(-61, -20, 8))
-# Plot slices at coordinates 0, -65, 40
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    threshold=.1,
-    cut_coords=(0, -65, 40))
+# print(f"ISC values shape = {median_iscs.shape} \ni.e., {median_iscs.shape[0]} "
+#       f"median value across left-out subjects and {iscs.shape[1]} voxel(s)"
+#       f"\nMinimum median ISC across voxels = {np.nanmin(median_iscs):.3f}; "
+#       f"maximum median ISC across voxels = {np.nanmax(median_iscs):.3f}")
 
-isc_fn = 'isc_nonthresh_median.nii.gz'
-nib.save(isc_nii, isc_fn)
+# """
+# # unthresholded values based on median ISC
+# isc_nonthresh_median = np.full(median_iscs.shape, np.nan)
+# n_nans = np.sum(np.isnan(median_iscs))
+# print(f"{n_nans} voxels out of {median_iscs.shape[0]} are NaNs "
+#       f"({n_nans / median_iscs.shape[0] * 100:.2f}%)")
 
-"""  # raw median isc without stats
+# nonnan_mask = ~np.isnan(median_iscs)
+# nonnan_coords = np.where(nonnan_mask)
 
-"""
-# unthresholded values based on mean ISC
-isc_nonthresh_mean = np.full(mean_iscs.shape, np.nan)
-n_nans = np.sum(np.isnan(mean_iscs))
-print(f"{n_nans} voxels out of {mean_iscs.shape[0]} are NaNs "
-      f"({n_nans / mean_iscs.shape[0] * 100:.2f}%)")
-nonnan_mask = ~np.isnan(mean_iscs)
-nonnan_coords = np.where(nonnan_mask)
-nonnan_isc = mean_iscs[nonnan_mask]
-isc_nonthresh_mean[nonnan_coords] = nonnan_isc
-isc_img = np.full(ref_nii.shape, np.nan)
-isc_img[mask_coords] = isc_nonthresh_mean
-isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
-# Plot slices at coordinates -61, -20, 8
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    cut_coords=(-61, -20, 8))
-# Plot slices at coordinates 0, -65, 40
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    cut_coords=(0, -65, 40))
-plt.show()
-# Plot slices at coordinates -61, -20, 8
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    threshold=.1,
-    cut_coords=(-61, -20, 8))
-# Plot slices at coordinates 0, -65, 40
-plot_stat_map(
-    isc_nii,
-    cmap='RdYlBu_r',
-    vmax=.5,
-    threshold=.1,
-    cut_coords=(0, -65, 40))
-isc_fn = 'isc_nonthresh_mean.nii.gz'
-nib.save(isc_nii, isc_fn)
+# nonnan_isc = median_iscs[nonnan_mask]
+# isc_nonthresh_median[nonnan_coords] = nonnan_isc
+# isc_img = np.full(ref_nii.shape, np.nan)
+# isc_img[mask_coords] = isc_nonthresh_median
+# isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
 
-"""  # raw mean isc without stats
+# # Plot slices at coordinates -61, -20, 8
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     cut_coords=(-61, -20, 8))
+# # Plot slices at coordinates 0, -65, 40
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     cut_coords=(0, -65, 40))
+# plt.show()
+# # Plot slices at coordinates -61, -20, 8
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     threshold=.1,
+#     cut_coords=(-61, -20, 8))
+# # Plot slices at coordinates 0, -65, 40
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     threshold=.1,
+#     cut_coords=(0, -65, 40))
 
-if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz'):
-    # Run bootstrap hypothesis test on ISCs
-    observed, ci, p, distribution = bootstrap_isc(iscs, pairwise=False,
-                                                  ci_percentile=95,
-                                                  summary_statistic='median',
-                                                  n_bootstraps=10)
+# isc_fn = 'isc_nonthresh_median.nii.gz'
+# nib.save(isc_nii, isc_fn)
 
-    # Get number of NaN voxels
-    n_nans = np.sum(np.isnan(observed))
-    print(f"{n_nans} voxels out of {observed.shape[0]} are NaNs "
-          f"({n_nans / observed.shape[0] * 100:.2f}%)")
+# """  # raw median isc without stats
 
-    # Get voxels without NaNs
-    nonnan_mask = ~np.isnan(observed)
-    nonnan_coords = np.where(nonnan_mask)
+# """
+# # unthresholded values based on mean ISC
+# isc_nonthresh_mean = np.full(mean_iscs.shape, np.nan)
+# n_nans = np.sum(np.isnan(mean_iscs))
+# print(f"{n_nans} voxels out of {mean_iscs.shape[0]} are NaNs "
+#       f"({n_nans / mean_iscs.shape[0] * 100:.2f}%)")
+# nonnan_mask = ~np.isnan(mean_iscs)
+# nonnan_coords = np.where(nonnan_mask)
+# nonnan_isc = mean_iscs[nonnan_mask]
+# isc_nonthresh_mean[nonnan_coords] = nonnan_isc
+# isc_img = np.full(ref_nii.shape, np.nan)
+# isc_img[mask_coords] = isc_nonthresh_mean
+# isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
+# # Plot slices at coordinates -61, -20, 8
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     cut_coords=(-61, -20, 8))
+# # Plot slices at coordinates 0, -65, 40
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     cut_coords=(0, -65, 40))
+# plt.show()
+# # Plot slices at coordinates -61, -20, 8
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     threshold=.1,
+#     cut_coords=(-61, -20, 8))
+# # Plot slices at coordinates 0, -65, 40
+# plot_stat_map(
+#     isc_nii,
+#     cmap='RdYlBu_r',
+#     vmax=.5,
+#     threshold=.1,
+#     cut_coords=(0, -65, 40))
+# isc_fn = 'isc_nonthresh_mean.nii.gz'
+# nib.save(isc_nii, isc_fn)
 
-    # Mask both the ISC and p-value map to exclude NaNs
-    nonnan_isc = observed[nonnan_mask]
-    nonnan_p = p[nonnan_mask]
+# """  # raw mean isc without stats
 
-    # Get FDR-controlled q-values
-    nonnan_q = multipletests(nonnan_p, method='fdr_bh')[1]
-    threshold = .05
-    print(f"{np.sum(nonnan_q < threshold)} significant voxels "
-          f"controlling FDR at {threshold}")
+# if not os.path.exists('../data/isc_thresh_pieman_n20.nii.gz'):
+#     # Run bootstrap hypothesis test on ISCs
+#     observed, ci, p, distribution = bootstrap_isc(iscs, pairwise=False,
+#                                                   ci_percentile=95,
+#                                                   summary_statistic='median',
+#                                                   n_bootstraps=10)
 
-    # Threshold ISCs according FDR-controlled threshold
-    nonnan_isc[nonnan_q >= threshold] = np.nan
+#     # Get number of NaN voxels
+#     n_nans = np.sum(np.isnan(observed))
+#     print(f"{n_nans} voxels out of {observed.shape[0]} are NaNs "
+#           f"({n_nans / observed.shape[0] * 100:.2f}%)")
 
-    # Reinsert thresholded ISCs back into whole brain image
-    isc_thresh = np.full(observed.shape, np.nan)
-    isc_thresh[nonnan_coords] = nonnan_isc
+#     # Get voxels without NaNs
+#     nonnan_mask = ~np.isnan(observed)
+#     nonnan_coords = np.where(nonnan_mask)
 
-    # Create empty 3D image and populate
-    # with thresholded ISC values
-    isc_img = np.full(ref_nii.shape, np.nan)
-    isc_img[mask_coords] = isc_thresh
+#     # Mask both the ISC and p-value map to exclude NaNs
+#     nonnan_isc = observed[nonnan_mask]
+#     nonnan_p = p[nonnan_mask]
 
-    # Convert to NIfTI image
-    isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
+#     # Get FDR-controlled q-values
+#     nonnan_q = multipletests(nonnan_p, method='fdr_bh')[1]
+#     threshold = .05
+#     print(f"{np.sum(nonnan_q < threshold)} significant voxels "
+#           f"controlling FDR at {threshold}")
 
-    # Plot slices at coordinates -61, -20, 8
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        vmax=.5,
-        cut_coords=(-61, -20, 8))
+#     # Threshold ISCs according FDR-controlled threshold
+#     nonnan_isc[nonnan_q >= threshold] = np.nan
 
-    # Plot slices at coordinates 0, -65, 40
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        vmax=.5,
-        cut_coords=(0, -65, 40))
-    plt.show()
+#     # Reinsert thresholded ISCs back into whole brain image
+#     isc_thresh = np.full(observed.shape, np.nan)
+#     isc_thresh[nonnan_coords] = nonnan_isc
 
-    # Plot slices at coordinates -61, -20, 8
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        vmax=.5,
-        threshold=.1,
-        cut_coords=(-61, -20, 8))
+#     # Create empty 3D image and populate
+#     # with thresholded ISC values
+#     isc_img = np.full(ref_nii.shape, np.nan)
+#     isc_img[mask_coords] = isc_thresh
 
-    # Plot slices at coordinates 0, -65, 40
-    plot_stat_map(
-        isc_nii,
-        cmap='RdYlBu_r',
-        vmax=.5,
-        threshold=.1,
-        cut_coords=(0, -65, 40))
+#     # Convert to NIfTI image
+#     isc_nii = nib.Nifti1Image(isc_img, ref_nii.affine, ref_nii.header)
 
-    # Save final ISC NIfTI image as .nii
-    isc_fn = 'isc_thresh_pieman_n20.nii.gz'
-    nib.save(isc_nii, isc_fn)
+#     # Plot slices at coordinates -61, -20, 8
+#     plot_stat_map(
+#         isc_nii,
+#         cmap='RdYlBu_r',
+#         vmax=.5,
+#         cut_coords=(-61, -20, 8))
+
+#     # Plot slices at coordinates 0, -65, 40
+#     plot_stat_map(
+#         isc_nii,
+#         cmap='RdYlBu_r',
+#         vmax=.5,
+#         cut_coords=(0, -65, 40))
+#     plt.show()
+
+#     # Plot slices at coordinates -61, -20, 8
+#     plot_stat_map(
+#         isc_nii,
+#         cmap='RdYlBu_r',
+#         vmax=.5,
+#         threshold=.1,
+#         cut_coords=(-61, -20, 8))
+
+#     # Plot slices at coordinates 0, -65, 40
+#     plot_stat_map(
+#         isc_nii,
+#         cmap='RdYlBu_r',
+#         vmax=.5,
+#         threshold=.1,
+#         cut_coords=(0, -65, 40))
+
+#     # Save final ISC NIfTI image as .nii
+#     isc_fn = 'isc_thresh_pieman_n20.nii.gz'
+#     nib.save(isc_nii, isc_fn)

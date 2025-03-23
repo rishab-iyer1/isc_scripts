@@ -18,7 +18,7 @@ from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data,
 # -------------------------------
 # Parameters
 # -------------------------------
-task = 'onesmallstep'
+task = 'toystory'
 # roi_selected = ['visualcortex', 'auditory', 'vmPFC', 'ACC', 'PCC', 'insula', 'amygdala', 'NA']
 roi_selected = ['wholebrain']
 # emotions = ['P', 'N', 'M', 'X', 'Cry']  # Positive, Negative, Mixed, Neutral, Cry
@@ -31,15 +31,15 @@ random_state = None
 window_size = 30
 step_size = 5
 if task == 'toystory':
-    n_trs = 274
-    n_shifts = 1024
+    n_trs = 288
+    n_shifts = 12
 elif task == 'onesmallstep':
     n_trs = 454
     n_shifts = 1024
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 16
+batch_size = 4
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -50,7 +50,7 @@ pairwise_name = "pairwise" if pairwise else "group"
 # File paths
 # -------------------------------
 if task == 'toystory':
-    data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data/ToyStoryNuisanceRegressed'
+    data_dir_func = '/jukebox/norman/rsiyer/isc/toystory/nuisance_regressed_cut'
 elif task == 'onesmallstep':
     data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
 else:
@@ -60,21 +60,19 @@ func_fns = glob(join(data_dir_func, 'P?.nii.gz')) + glob(join(data_dir_func, 'N?
            glob(join(data_dir_func, 'N??.nii.gz')) + glob(join(data_dir_func, 'VR??.nii.gz'))
 
 if task == 'toystory':
-    # remove VR7 and 8 temporarily for testing because they are 295 not 300 TRs
-    func_fns = [fn for fn in func_fns if 'VR7' not in fn and 'VR8' not in fn]
-    label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Toy_Story_Labelled'
+    label_dir = '/jukebox/norman/rsiyer/isc/VideoLabelling/Toy_Story_Labelled'
 elif task == 'onesmallstep':
     label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/OSS_Labelled'
 
 subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]  # assume BIDS format
 subj_ids.sort()
 
-roi_mask_path = '/Volumes/BCI/Ambivalent_Affect/rois'
+roi_mask_path = '/jukebox/norman/rsiyer/isc/isc_scripts/rois'
 all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
 all_roi_masker = get_rois(all_roi_fpaths)
-data_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/data/{task}'
-figure_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/figures/{task}'
-parc_path = f"{data_path}/../rois/schaefer_2018/Schaefer2018_1000Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
+data_path = f'/jukebox/norman/rsiyer/isc/outputs/{task}/data'
+figure_path = f'/jukebox/norman/rsiyer/isc/outputs/{task}/figures'
+parc_path = f"/jukebox/norman/rsiyer/isc/isc_scripts/schaefer_2018/Schaefer2018_1000Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
 mask_path = f"{data_path}/mask_img.npy"
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
@@ -96,6 +94,7 @@ def unpack_and_call(func, kwargs):
 
 if __name__ == '__main__':
     # roi_selected = roi_selected[1:]
+    func_fns = func_fns[:1]
     save_path = f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"
     if not os.path.exists(save_path):
         print("permutation path doesn't exist, computing...")
@@ -111,12 +110,13 @@ if __name__ == '__main__':
         iscs_roi_selected = dict(zip(roi_selected, [[] for _ in range(len(roi_selected))]))
         with cProfile.Profile() as profile:
             for i, roi in enumerate(bold_roi):
-                if parcellate: 
+                # print(roi)
+                if parcellate:
                     roi = parcellate_bold(roi, n_parcels, masked_parc)
                     print(roi.shape)
 
                 print(f'starting permutations for {roi_selected[i]}')
-
+                err
                 # Start timing
                 start_time = time.time()
                 with ThreadPoolExecutor() as executor:
