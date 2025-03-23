@@ -23,9 +23,9 @@ from isc_standalone import (isc, bootstrap_isc, compute_summary_statistic, load_
 # parser.add_argument('--data_dir_mask', type=str, description='Path to folder with ROI masks')
 # parser.add_argument('--data_dir_mni', type=str, description='Path to wholebrain mask, '
 #                                                             'for example MNI152_T1_2mm_brain_mask.nii.gz')
-data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
-data_dir_mask = '/Volumes/BCI/Ambivalent_Affect/rois'
-data_dir_mni = '/Volumes/BCI/Ambivalent_Affect'
+data_dir_func = '/jukebox/norman/rsiyer/isc/toystory/nuisance_regressed_cut'
+data_dir_mask = '/jukebox/norman/rsiyer/isc/toystory/rois'
+data_dir_mni = '/jukebox/norman/rsiyer/isc/toystory'
 
 # Filenames for MRI data; gzipped NIfTI images (.nii.gz)
 # func_fns = glob(join(data_dir, ('sub-*_task-pieman_space-MNI152NLin2009cAsym'
