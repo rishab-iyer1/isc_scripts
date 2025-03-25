@@ -32,14 +32,14 @@ window_size = 30
 step_size = 5
 if task == 'toystory':
     n_trs = 288
-    n_shifts = 12
+    n_shifts = 1024
 elif task == 'onesmallstep':
     n_trs = 454
     n_shifts = 1024
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 4
+batch_size = 16
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -94,7 +94,7 @@ def unpack_and_call(func, kwargs):
 
 if __name__ == '__main__':
     # roi_selected = roi_selected[1:]
-    func_fns = func_fns[:1]
+    # func_fns = func_fns[:3]
     save_path = f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois"
     if not os.path.exists(save_path):
         print("permutation path doesn't exist, computing...")
@@ -112,11 +112,11 @@ if __name__ == '__main__':
             for i, roi in enumerate(bold_roi):
                 # print(roi)
                 if parcellate:
-                    roi = parcellate_bold(roi, n_parcels, masked_parc)
+                    roi = parcellate_bold(roi, n_parcels, masked_parc[0].get_fdata())
                     print(roi.shape)
 
                 print(f'starting permutations for {roi_selected[i]}')
-                err
+
                 # Start timing
                 start_time = time.time()
                 with ThreadPoolExecutor() as executor:

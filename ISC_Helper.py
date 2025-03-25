@@ -559,14 +559,10 @@ def parcellate_bold(data, n_parcels, masked_parc):
     # Loop over each subject independently
     for subj_idx in range(data.shape[2]):
         for parcel_id in range(1, n_parcels + 1):
-            print(masked_parc == parcel_id)
             parcel_voxels = np.where(masked_parc == parcel_id)[0]
-            print(parcel_voxels.shape)
-            print(parcel_voxels.sum())
+            # print(parcel_voxels.sum())
             if parcel_voxels.size > 0:
-                # print('here')
                 parcel_ts[:, parcel_id - 1, subj_idx] = np.mean(data[:, parcel_voxels, subj_idx], axis=1)
-    # print(parcel_ts)
     all_parcel_data.append(parcel_ts)  # Shape: (454, 1000, 27)
     
     all_parcel_data = np.array(all_parcel_data)[0]  # Shape: (num_subjects, 454, 1000, 27)
