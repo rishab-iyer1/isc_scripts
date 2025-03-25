@@ -11,18 +11,18 @@
 #SBATCH --partition=all
 
 # How long is job?
-#SBATCH -t 00:01:00
+#SBATCH -t 48:00:00
 
 # How much memory to allocate (in MB)?
-##SBATCH --cpus-per-task=16 --mem-per-cpu=10000
-#SBATCH --cpus-per-task=1 --mem-per-cpu=2000
+#SBATCH --cpus-per-task=8 --mem-per-cpu=24000
 
 # Update with your email 
 ##SBATCH --mail-user=rsiyer@princeton.edu
 ##SBATCH --mail-type=BEGIN,END,FAIL
 
-conda init
-conda activate isc2
+module purge
+module load anacondapy/2024.02
+conda activate /usr/people/ri4541/miniconda3/envs/isc2
 cd /jukebox/norman/rsiyer/isc/isc_scripts
-
 python sliding_isc_toystory.py
+jupyter nbconvert --to script sliding_isc.ipynb --output ridge && ipython ridge.py

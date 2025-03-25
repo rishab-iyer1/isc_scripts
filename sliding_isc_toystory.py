@@ -4,7 +4,7 @@ ISC with sliding window to capture variations in relationship between ISC and em
 
 import os
 import pickle
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import cProfile
 import time
 from glob import glob
@@ -32,14 +32,14 @@ window_size = 30
 step_size = 5
 if task == 'toystory':
     n_trs = 288
-    n_shifts = 1024
+    n_shifts = 102400
 elif task == 'onesmallstep':
     n_trs = 454
     n_shifts = 1024
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 16
+batch_size = 32
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -119,7 +119,7 @@ if __name__ == '__main__':
 
                 # Start timing
                 start_time = time.time()
-                with ThreadPoolExecutor() as executor:
+                with ProcessPoolExecutor() as executor:
                     futures = []
                     for n_batch in (pbar := tqdm([n_shifts_batch]*batch_size)):
                         futures.append(executor.submit(_compute_phaseshift_sliding_isc, data=roi, n_trs=n_trs, window_size=window_size,
