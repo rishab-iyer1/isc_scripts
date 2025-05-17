@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[3]:
+# In[1]:
 
 
 import os
@@ -30,6 +30,7 @@ roi_selected = ['wholebrain']
 # emotions = ['P', 'N', 'M', 'X', 'Cry']  # Positive, Negative, Mixed, Neutral, Cry
 emotions = ['P', 'N', 'M']
 parcellate = True
+subset_oss = True
 avg_over_roi = False
 spatial = False
 pairwise = False
@@ -93,8 +94,16 @@ if parcellate:
     n_parcels = 1000
     parc, masked_parc = load_schaeffer1000(parc_path, mask_path)
 
+if subset_oss:
+    assert task == 'toystory'
+    assert parcellate is True
+    assert n_parcels == 1000
+    n_parcels = 183
+    mask = pickle.load(open(f"{data_path}/oss_sig_betas_mask.pkl", 'rb'))
+    union_mask = np.unique(np.concatenate(mask))
 
-# In[20]:
+
+# In[3]:
 
 
 # if task == 'onesmallstep':
@@ -108,13 +117,13 @@ with open(save_path, 'rb') as f:
 assert list(x.keys()) == roi_selected
 
 
-# In[21]:
+# In[4]:
 
 
 x[roi_selected[0]][2].shape
 
 
-# In[23]:
+# In[5]:
 
 
 label_dir = '/jukebox/norman/rsiyer/isc/VideoLabelling'
@@ -128,7 +137,7 @@ elif task == 'toystory':
 print('shape after trimming:', coded_states.shape)
 
 
-# In[24]:
+# In[6]:
 
 
 timepoint_variance = np.var(coded_states[:, :n_trs, :], axis=0)  # shape=(n_trs, n_emotions)
@@ -143,7 +152,7 @@ for i in range(n_windows):
     slide_behav[i] = np.mean(timepoint_variance[start_idx:end_idx], axis=0)
 
 
-# In[25]:
+# In[7]:
 
 
 print('shape before removing:', slide_behav.shape)  # 8 rois, shape=(n_windows, n_emotions)
@@ -157,13 +166,13 @@ print('shape after removing:', slide_behav.shape)
 
 # Now that the data is formatted for regression, test the assumptions of linear regression 
 
-# In[26]:
+# In[8]:
 
 
 # roi_data[2].shape
 
 
-# In[27]:
+# In[9]:
 
 
 # # 1. Linearity (correlation between ISC and behavior)
@@ -181,13 +190,13 @@ print('shape after removing:', slide_behav.shape)
 # print('std:', np.std(pearsonr_list))
 
 
-# In[28]:
+# In[10]:
 
 
 x['wholebrain'][2].shape
 
 
-# In[29]:
+# In[11]:
 
 
 if parcellate:
@@ -208,7 +217,7 @@ if parcellate:
         true_means.append(mean_mses[np.argmin(mean_mses)])
         true_stds.append(std_mses[np.argmin(std_mses)])
         true_r2s.append(model.score(slide_behav, true_isc_data))
-    # [print(f"emotion consensus explains {true_r2s[r]:.2f} of variance in {roi} synchrony") for r, roi in enumerate(roi_selected)]
+    [print(f"emotion consensus explains {true_r2s[r]:.2%} of variance in {roi} synchrony") for r, roi in enumerate(roi_selected)]
 else:
     true_coefs = np.empty(shape=(len(roi_selected), len(emotions)))
     true_means = []
@@ -227,16 +236,16 @@ else:
         true_means.append(mean_mses[np.argmin(mean_mses)])
         true_stds.append(std_mses[np.argmin(std_mses)])
         true_r2s.append(model.score(slide_behav, true_isc_data))
-    [print(f"emotion consensus explains {true_r2s[r]:.2f} of variance in {roi} synchrony") for r, roi in enumerate(roi_selected)]
+    [print(f"emotion consensus explains {true_r2s[r]:.2%} of variance in {roi} synchrony") for r, roi in enumerate(roi_selected)]
 
 
-# In[30]:
+# In[12]:
 
 
 x['wholebrain'][0][0].shape
 
 
-# In[ ]:
+# In[13]:
 
 
 # if parcellate:
@@ -299,7 +308,7 @@ x['wholebrain'][0][0].shape
 #         perm_r2s[r] = r2s
 
 
-# In[55]:
+# In[14]:
 
 
 from concurrent.futures import ProcessPoolExecutor
@@ -347,7 +356,7 @@ for parcel, coefs, means, stds, r2s in results:
     perm_r2s[parcel] = r2s
 
 
-# In[19]:
+# In[15]:
 
 
 # if parcellate:
@@ -361,7 +370,7 @@ for parcel, coefs, means, stds, r2s in results:
 #         )
 
 
-# In[34]:
+# In[16]:
 
 
 if parcellate:
@@ -422,74 +431,96 @@ else:
             print(f"{roi}: R2 = {true_r2s[r]:.2f}, p = {p_r2[r]:.2f}")
 
 
-# In[38]:
+# In[17]:
+
+
+union_mask
+
+
+# In[18]:
 
 
 import nibabel as nib
 parc = nib.load(parc_path)
 img = np.zeros(shape=((*parc.shape, len(emotions))))
-for p in range(1, n_parcels + 1):
-    mask = parc.get_fdata() == p  # location of current parcel
-    img[mask, :] = p_fdr[p - 1].T
+
+if subset_oss:
+    # map back from union mask to 1000 parcels
+    for p in range(n_parcels):
+        orig_parcel = union_mask[p]
+        mask = parc.get_fdata() == orig_parcel
+        img[mask, :] = p_fdr[p].T
+else:
+    for p in range(1, n_parcels + 1):
+        mask = parc.get_fdata() == p  # location of current parcel
+        img[mask, :] = p_fdr[p - 1].T
 
 all_p = nib.Nifti1Image(img, parc.affine)
 
 
-# In[39]:
+# In[19]:
 
 
 all_p.shape
 
 
-# In[42]:
-
-
-all_p.get_fdata()
-
-
-# In[ ]:
+# In[20]:
 
 
 img = np.zeros(shape=((*parc.shape, len(emotions))))
-for p in range(1, n_parcels + 1):
-    mask = parc.get_fdata() == p  # location of current parcel
-    img[mask, :] = true_coefs[p - 1].T
+if subset_oss:
+    # map back from union mask to 1000 parcels
+    for p in range(n_parcels):
+        orig_parcel = union_mask[p]
+        mask = parc.get_fdata() == orig_parcel
+        img[mask, :] = true_coefs[p].T
+else:
+    for p in range(1, n_parcels + 1):
+        mask = parc.get_fdata() == p  # location of current parcel
+        img[mask, :] = true_coefs[p - 1].T
 
 raw = nib.Nifti1Image(img, parc.affine)
 
 nib.save(raw, f"{data_path}/emotion_coefs_raw_{n_shifts}perms_{len(roi_selected)}rois")
 
 
-# In[ ]:
+# In[21]:
 
 
 nib.save(all_p, f"{data_path}/emotion_pvals_corrected_{n_shifts}perms_{len(roi_selected)}rois")
 
 
-# In[47]:
+# In[22]:
 
 
 p_coef_thresholded = np.where(p_fdr < 0.05, true_coefs, 0)
 
 
-# In[49]:
+# In[23]:
 
 
 coef = np.zeros(shape=((*parc.shape, len(emotions))))
-for p in range(1, n_parcels + 1):
-    mask = parc.get_fdata() == p  # location of current parcel
-    coef[mask, :] = p_coef_thresholded[p - 1].T
+if subset_oss:
+    # map back from union mask to 1000 parcels
+    for p in range(n_parcels):
+        orig_parcel = union_mask[p]
+        mask = parc.get_fdata() == orig_parcel
+        coef[mask, :] = p_coef_thresholded[p].T
+else:
+    for p in range(1, n_parcels + 1):
+        mask = parc.get_fdata() == p  # location of current parcel
+        coef[mask, :] = p_coef_thresholded[p - 1].T
 
 coef_nii = nib.Nifti1Image(coef, parc.affine)
 
 
-# In[ ]:
+# In[24]:
 
 
 nib.save(coef_nii, f"{data_path}/emotion_betas_corrected_{n_shifts}perms_{len(roi_selected)}rois")
 
 
-# In[51]:
+# In[25]:
 
 
 # all_p = []
@@ -498,19 +529,19 @@ nib.save(coef_nii, f"{data_path}/emotion_betas_corrected_{n_shifts}perms_{len(ro
     
 
 
-# In[52]:
+# In[26]:
 
 
 # p_r2, roi_selected
 
 
-# In[ ]:
+# In[27]:
 
 
 if parcellate:
-    num_to_plot = 3
+    num_to_plot = 20
     print('plotting true vs null dist')
-    plt.figure(figsize=(15, 10))
+    plt.figure(figsize=(15, 4*num_to_plot))
     for parcel in tqdm(range(num_to_plot)):
         for e, emo in enumerate(emotions):
             plt.subplot(num_to_plot, len(emotions), parcel * len(emotions) + e + 1)
@@ -523,6 +554,7 @@ if parcellate:
 
     plt.tight_layout()
     plt.savefig(f'{figure_path}/true_vs_null_{n_shifts}perms_{len(roi_selected)}rois')
+    plt.show()
 else:
     print('plotting true vs null dist')
     plt.figure(figsize=(15, 10))
@@ -540,7 +572,7 @@ else:
     # plt.savefig(f'{figure_path}/true_vs_null')
 
 
-# In[ ]:
+# In[28]:
 
 
 # plt.figure(figsize=(15, 10))
@@ -556,13 +588,13 @@ else:
 # # plt.savefig(f'{figure_path}/PCC_corr')
 
 
-# In[ ]:
+# In[29]:
 
 
 # x[roi][2].shape
 
 
-# In[64]:
+# In[30]:
 
 
 # plt.figure()

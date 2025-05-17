@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Name of job?
-#SBATCH --job-name=sliding_isc
+#SBATCH --job-name=sliding_isc_union_mask
 
 # Where to output log files?
 # make sure this logs directory exists!! otherwise the script won't run
@@ -11,14 +11,14 @@
 #SBATCH --partition=all
 
 # How long is job?
-#SBATCH -t 48:00:00
+#SBATCH -t 6:00:00
 
 # How much memory to allocate (in MB)?
 #SBATCH --cpus-per-task=8 --mem-per-cpu=24000
 
 # Update with your email 
-##SBATCH --mail-user=rsiyer@princeton.edu
-##SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=rsiyer@princeton.edu
+#SBATCH --mail-type=END
 
 module purge
 module load anacondapy/2024.02

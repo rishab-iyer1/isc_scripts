@@ -32,7 +32,7 @@ window_size = 30
 step_size = 5
 if task == 'toystory':
     n_trs = 288
-    n_shifts = 102400
+    n_shifts = 10240
 elif task == 'onesmallstep':
     n_trs = 454
     n_shifts = 1024
@@ -83,6 +83,7 @@ if parcellate:
     n_parcels = 1000
     masked_parc = load_schaeffer1000(parc_path, mask_path)
 
+subset_oss = True
 
 # -------------------------------
 # Compute and save ISC
@@ -115,10 +116,22 @@ if __name__ == '__main__':
                     roi = parcellate_bold(roi, n_parcels, masked_parc[0].get_fdata())
                     print(roi.shape)
 
-                print(f'starting permutations for {roi_selected[i]}')
+                if subset_oss:
+                    assert task == 'toystory'
+                    assert parcellate is True
+                    assert roi.shape[1] == 1000
+                    # load mask defined from oss
+                    mask = pickle.load(open(f"{data_path}/oss_sig_betas_mask.pkl", 'rb'))
+                    union_mask = np.unique(np.concatenate(mask))
+                    print('subsetting with significant parcels from OSS')
+                    print(f"roi shape before subsetting: {roi.shape}")
+                    roi = roi[:, union_mask]
+                    print(f"roi shape after subsetting: {roi.shape}")
 
                 # Start timing
                 start_time = time.time()
+                print(f'starting permutations for {roi_selected[i]}')
+
                 with ProcessPoolExecutor() as executor:
                     futures = []
                     for n_batch in (pbar := tqdm([n_shifts_batch]*batch_size)):
@@ -169,3 +182,14 @@ if __name__ == '__main__':
 
     else:
         print(f"File already exists: \n{save_path}")
+        with open(f"{sliding_perm_path}_{n_shifts}perms_{len(roi_selected)}rois_x", 'rb') as f:
+            x = pickle.load(f)
+
+        for roi in roi_selected:
+            print(f"roi: {roi}")
+            print(f"observed shape: {x[roi][0].shape}")
+            print(f"p shape: {x[roi][1].shape}")
+            print(f"distribution shape: {x[roi][2].shape}")
+            print(f"observed mean: {np.mean(x[roi][0])}")
+            print(f"p mean: {np.mean(x[roi][1])}")
+            print(f"distribution mean: {np.mean(x[roi][2])}")
