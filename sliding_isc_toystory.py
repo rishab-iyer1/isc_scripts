@@ -18,12 +18,13 @@ from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data,
 # -------------------------------
 # Parameters
 # -------------------------------
-task = 'toystory'
+task = 'onesmallstep'
 # roi_selected = ['visualcortex', 'auditory', 'vmPFC', 'ACC', 'PCC', 'insula', 'amygdala', 'NA']
 roi_selected = ['wholebrain']
 # emotions = ['P', 'N', 'M', 'X', 'Cry']  # Positive, Negative, Mixed, Neutral, Cry
 emotions = ['P', 'N', 'M']
 parcellate = True
+subset_oss = False
 avg_over_roi = False
 spatial = False
 pairwise = False
@@ -32,14 +33,14 @@ window_size = 30
 step_size = 5
 if task == 'toystory':
     n_trs = 288
-    n_shifts = 10240
+    n_shifts = 12
 elif task == 'onesmallstep':
     n_trs = 454
     n_shifts = 1024
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 32
+batch_size = 8
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -52,9 +53,12 @@ pairwise_name = "pairwise" if pairwise else "group"
 if task == 'toystory':
     data_dir_func = '/jukebox/norman/rsiyer/isc/toystory/nuisance_regressed_cut'
 elif task == 'onesmallstep':
-    data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
+    data_dir_func = '/jukebox/norman/rsiyer/isc/outputs/onesmallstep/data/nuisance_regressed_cut'
 else:
     raise ValueError('Invalid task')
+
+assert os.path.exists(data_dir_func)
+
 func_fns = glob(join(data_dir_func, 'P?.nii.gz')) + glob(join(data_dir_func, 'N?.nii.gz')) + \
            glob(join(data_dir_func, 'VR?.nii.gz')) + glob(join(data_dir_func, 'P??.nii.gz')) + \
            glob(join(data_dir_func, 'N??.nii.gz')) + glob(join(data_dir_func, 'VR??.nii.gz'))
@@ -72,18 +76,16 @@ all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
 all_roi_masker = get_rois(all_roi_fpaths)
 data_path = f'/jukebox/norman/rsiyer/isc/outputs/{task}/data'
 figure_path = f'/jukebox/norman/rsiyer/isc/outputs/{task}/figures'
-parc_path = f"/jukebox/norman/rsiyer/isc/isc_scripts/schaefer_2018/Schaefer2018_1000Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
+parc_path = f"/jukebox/norman/rsiyer/isc/isc_scripts/schaefer_2018/Schaefer2018_300Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
 mask_path = f"{data_path}/mask_img.npy"
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
-sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}"
+sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}_300parcels"
 if parcellate:
     assert avg_over_roi is False
     sliding_perm_path += "parcellated"
-    n_parcels = 1000
+    n_parcels = 300
     masked_parc = load_schaeffer1000(parc_path, mask_path)
-
-subset_oss = True
 
 # -------------------------------
 # Compute and save ISC
@@ -101,6 +103,7 @@ if __name__ == '__main__':
         print("permutation path doesn't exist, computing...")
         from itertools import repeat
         start = time.perf_counter()
+        print('roi_selected:', roi_selected)
         with ThreadPoolExecutor() as executor:
             bold_roi = executor.map(load_roi_data, roi_selected, repeat(all_roi_masker), repeat(func_fns), repeat(data_path))  # repeat is used to pass the parameter to each iteration in map(). the 
 
