@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Name of job?
-#SBATCH --job-name=sliding_isc_union_mask
+#SBATCH --job-name=sliding_isc_300parcels
 
 # Where to output log files?
 # make sure this logs directory exists!! otherwise the script won't run
@@ -11,7 +11,7 @@
 #SBATCH --partition=all
 
 # How long is job?
-#SBATCH -t 6:00:00
+#SBATCH -t 2:00:00
 
 # How much memory to allocate (in MB)?
 #SBATCH --cpus-per-task=8 --mem-per-cpu=24000
