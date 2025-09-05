@@ -103,6 +103,7 @@ def load_roi_data(roi: str, all_roi_masker: Dict[str, NiftiMasker], func_fns: Li
     for n, subj_id in enumerate(subj_ids):
         # Get the data for task t, subject s
         bold_path = f"{data_path}/bold_roi/{roi}_{subj_id}.npy"
+        os.makedirs(f"{data_path}/bold_roi", exist_ok=True)
         if not os.path.exists(bold_path):
             nii_t_s = nib.load(func_fns[n])
             bold_roi.append(roi_masker.fit_transform(nii_t_s))
