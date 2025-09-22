@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 import os
+import sys
 import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import cProfile
@@ -15,13 +16,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.linear_model import RidgeCV
+sys.path.append('isc_scripts')
 from isc_standalone import p_from_null
 from ISC_Helper import get_rois, _compute_phaseshift_sliding_isc, load_roi_data, parcellate_bold, load_schaeffer1000, parcel_to_nifti
 from statsmodels.stats.multitest import multipletests
 # %matplotlib inline
 
 
-# In[ ]:
+# In[6]:
 
 
 task = 'onesmallstep'
@@ -81,7 +83,6 @@ all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
 all_roi_masker = get_rois(all_roi_fpaths)
 data_path = f'{amb_aff_path}/outputs/{task}/data'
 figure_path = f'{amb_aff_path}/outputs/{task}/figures'
-os.makedirs(figure_path, exist_ok=True)
 parc_path = f"{amb_aff_path}/isc_scripts/schaefer_2018/Schaefer2018_300Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
 mask_path = f"{data_path}/mask_img.npy"
 
@@ -104,7 +105,7 @@ if subset_oss:
     union_mask = np.unique(np.concatenate(mask))
 
 
-# In[ ]:
+# In[7]:
 
 
 # if task == 'onesmallstep':
@@ -118,13 +119,13 @@ with open(save_path, 'rb') as f:
 assert list(x.keys()) == roi_selected
 
 
-# In[ ]:
+# In[8]:
 
 
 x[roi_selected[0]][2].shape
 
 
-# In[ ]:
+# In[9]:
 
 
 label_dir = '/jukebox/norman/rsiyer/isc/VideoLabelling'
@@ -138,7 +139,7 @@ elif task == 'toystory':
 print('shape after trimming:', coded_states.shape)
 
 
-# In[ ]:
+# In[10]:
 
 
 timepoint_variance = np.var(coded_states[:, :n_trs, :], axis=0)  # shape=(n_trs, n_emotions)
@@ -153,7 +154,7 @@ for i in range(n_windows):
     slide_behav[i] = np.mean(timepoint_variance[start_idx:end_idx], axis=0)
 
 
-# In[ ]:
+# In[11]:
 
 
 print('shape before removing:', slide_behav.shape)  # 8 rois, shape=(n_windows, n_emotions)
@@ -167,13 +168,13 @@ print('shape after removing:', slide_behav.shape)
 
 # Now that the data is formatted for regression, test the assumptions of linear regression 
 
-# In[ ]:
+# In[12]:
 
 
 # roi_data[2].shape
 
 
-# In[ ]:
+# In[13]:
 
 
 # # 1. Linearity (correlation between ISC and behavior)
@@ -191,13 +192,13 @@ print('shape after removing:', slide_behav.shape)
 # print('std:', np.std(pearsonr_list))
 
 
-# In[ ]:
+# In[14]:
 
 
 x['wholebrain'][2].shape
 
 
-# In[ ]:
+# In[15]:
 
 
 if parcellate:
@@ -240,13 +241,13 @@ else:
     [print(f"emotion consensus explains {true_r2s[r]:.2%} of variance in {roi} synchrony") for r, roi in enumerate(roi_selected)]
 
 
-# In[ ]:
+# In[16]:
 
 
 x['wholebrain'][0][0].shape
 
 
-# In[ ]:
+# In[17]:
 
 
 # if parcellate:
@@ -309,7 +310,7 @@ x['wholebrain'][0][0].shape
 #         perm_r2s[r] = r2s
 
 
-# In[ ]:
+# In[18]:
 
 
 from concurrent.futures import ProcessPoolExecutor
@@ -357,7 +358,7 @@ for parcel, coefs, means, stds, r2s in results:
     perm_r2s[parcel] = r2s
 
 
-# In[ ]:
+# In[19]:
 
 
 # if parcellate:
@@ -371,7 +372,7 @@ for parcel, coefs, means, stds, r2s in results:
 #         )
 
 
-# In[ ]:
+# In[20]:
 
 
 if parcellate:
@@ -432,7 +433,42 @@ else:
             print(f"{roi}: R2 = {true_r2s[r]:.2f}, p = {p_r2[r]:.2f}")
 
 
-# In[ ]:
+# In[21]:
+
+
+np.sum(p_coef[:,0] < 0.01), np.sum(p_coef[:,1] < 0.01), np.sum(p_coef[:,2] < 0.01)
+
+
+# In[22]:
+
+
+plt.hist(p_coef[:,0], range=(0,0.1))
+
+
+# In[23]:
+
+
+plt.hist(p_coef.flatten(), bins=50)
+plt.title("Raw P-value Distribution")
+
+
+# In[24]:
+
+
+from statsmodels.stats.multitest import multipletests
+pvals = p_coef.flatten()  # Or p_coef[:, e] if per emotion
+reject, qvals, _, _ = multipletests(pvals, alpha=0.05, method='fdr_bh')
+
+# Inspect minimum raw p, minimum corrected p
+print(f"Min raw p-value: {pvals.min():.5f}")
+print(f"Min FDR-corrected p-value: {qvals.min():.5f}")
+
+# How many would be significant uncorrected?
+print(f"Raw p < 0.05: {(pvals < 0.05).sum()}")
+print(f"FDR q < 0.05: {(qvals < 0.05).sum()}")
+
+
+# In[25]:
 
 
 import nibabel as nib
@@ -453,13 +489,13 @@ else:
 all_p = nib.Nifti1Image(img, parc.affine)
 
 
-# In[ ]:
+# In[26]:
 
 
 all_p.shape
 
 
-# In[ ]:
+# In[27]:
 
 
 img = np.zeros(shape=((*parc.shape, len(emotions))))
@@ -479,19 +515,19 @@ raw = nib.Nifti1Image(img, parc.affine)
 nib.save(raw, f"{data_path}/emotion_coefs_raw_{n_shifts}perms_{len(roi_selected)}rois")
 
 
-# In[ ]:
+# In[28]:
 
 
 nib.save(all_p, f"{data_path}/emotion_pvals_corrected_{n_shifts}perms_{len(roi_selected)}rois")
 
 
-# In[ ]:
+# In[29]:
 
 
 p_coef_thresholded = np.where(p_fdr < 0.05, true_coefs, 0)
 
 
-# In[ ]:
+# In[30]:
 
 
 coef = np.zeros(shape=((*parc.shape, len(emotions))))
@@ -509,13 +545,13 @@ else:
 coef_nii = nib.Nifti1Image(coef, parc.affine)
 
 
-# In[ ]:
+# In[31]:
 
 
 nib.save(coef_nii, f"{data_path}/emotion_betas_corrected_{n_shifts}perms_{len(roi_selected)}rois")
 
 
-# In[ ]:
+# In[32]:
 
 
 # all_p = []
@@ -524,13 +560,13 @@ nib.save(coef_nii, f"{data_path}/emotion_betas_corrected_{n_shifts}perms_{len(ro
     
 
 
-# In[ ]:
+# In[33]:
 
 
 # p_r2, roi_selected
 
 
-# In[ ]:
+# In[34]:
 
 
 if parcellate:
@@ -567,7 +603,41 @@ else:
     # plt.savefig(f'{figure_path}/true_vs_null')
 
 
-# In[ ]:
+# In[35]:
+
+
+# map true_coefs back to 1000 parcels (undo subsetting)
+if parcellate:
+    full_img = np.zeros(shape=((*parc.shape, len(emotions))))
+    if subset_oss:
+        # map back from union mask to 1000 parcels
+        for p in range(n_parcels):
+            orig_parcel = union_mask[p]
+            mask = parc.get_fdata() == orig_parcel
+            full_img[mask, :] = true_coefs[p].T
+    else:
+        for p in range(1, n_parcels + 1):
+            mask = parc.get_fdata() == p  # location of current parcel
+            full_img[mask, :] = true_coefs[p - 1].T
+
+    raw = nib.Nifti1Image(full_img, parc.affine)
+    print(raw.shape)
+    # nib.save(raw, f"{data_path}/emotion_coefs_raw_{n_shifts}perms_{len(roi_selected)}rois")
+
+
+# In[36]:
+
+
+p_fdr.min()
+
+
+# In[37]:
+
+
+p_coef[:10]
+
+
+# In[38]:
 
 
 # plt.figure(figsize=(15, 10))
@@ -583,13 +653,13 @@ else:
 # # plt.savefig(f'{figure_path}/PCC_corr')
 
 
-# In[ ]:
+# In[39]:
 
 
 # x[roi][2].shape
 
 
-# In[ ]:
+# In[40]:
 
 
 # plt.figure()

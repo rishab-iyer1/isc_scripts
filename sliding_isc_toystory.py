@@ -29,6 +29,7 @@ avg_over_roi = False
 spatial = False
 pairwise = False
 random_state = None
+n_parcels = 1000
 window_size = 30
 step_size = 5
 if task == 'toystory':
@@ -36,11 +37,11 @@ if task == 'toystory':
     n_shifts = 12
 elif task == 'onesmallstep':
     n_trs = 454
-    n_shifts = 1024
+    n_shifts = 10240
 else:
     raise Exception('task not defined')
 n_windows = int((n_trs - window_size) / step_size) + 1
-batch_size = 8
+batch_size = 20
 
 smooth = 'smooth'
 avg_over_roi_name = "avg" if avg_over_roi else "voxelwise"
@@ -76,16 +77,15 @@ all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
 all_roi_masker = get_rois(all_roi_fpaths)
 data_path = f'/jukebox/norman/rsiyer/isc/outputs/{task}/data'
 figure_path = f'/jukebox/norman/rsiyer/isc/outputs/{task}/figures'
-parc_path = f"/jukebox/norman/rsiyer/isc/isc_scripts/schaefer_2018/Schaefer2018_300Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
+parc_path = f"/jukebox/norman/rsiyer/isc/isc_scripts/schaefer_2018/Schaefer2018_{n_parcels}Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
 mask_path = f"{data_path}/mask_img.npy"
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
-sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}_300parcels"
+sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}_{n_parcels}parcels"
 
 if parcellate:
     assert avg_over_roi is False
     sliding_perm_path += "parcellated"
-    n_parcels = 300
     masked_parc = load_schaeffer1000(parc_path, mask_path)
 
 # -------------------------------
@@ -123,7 +123,7 @@ if __name__ == '__main__':
                 if subset_oss:
                     assert task == 'toystory'
                     assert parcellate is True
-                    assert roi.shape[1] == 1000
+                    assert roi.shape[1] == n_parcels
                     # load mask defined from oss
                     mask = pickle.load(open(f"{data_path}/oss_sig_betas_mask.pkl", 'rb'))
                     union_mask = np.unique(np.concatenate(mask))

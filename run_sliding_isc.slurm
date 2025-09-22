@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # Name of job?
-#SBATCH --job-name=sliding_isc_300parcels
+#SBATCH --job-name=sliding_isc_1000parcels
 
 # Where to output log files?
 # make sure this logs directory exists!! otherwise the script won't run
-#SBATCH --output='/jukebox/norman/rsiyer/isc/toystory/logs/%A.log'
+#SBATCH --output='/jukebox/norman/rsiyer/isc/outputs/onesmallstep/slurms/%A.log'
 
 # Set partition
 #SBATCH --partition=all
 
 # How long is job?
-#SBATCH -t 2:00:00
+#SBATCH -t 4:00:00
 
 # How much memory to allocate (in MB)?
 #SBATCH --cpus-per-task=8 --mem-per-cpu=24000
