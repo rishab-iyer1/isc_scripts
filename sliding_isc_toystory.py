@@ -27,7 +27,7 @@ parcellate = True
 avg_over_roi = False
 spatial = False
 pairwise = False
-random_state = None
+random_state = 42
 window_size = 30
 step_size = 5
 if task == 'toystory':
@@ -49,42 +49,45 @@ pairwise_name = "pairwise" if pairwise else "group"
 # -------------------------------
 # File paths
 # -------------------------------
+base_dir = '/usr/people/ri4541/juke/isc'
 if task == 'toystory':
-    data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data/ToyStoryNuisanceRegressed'
+    data_dir_func = f'{base_dir}/outputs/{task}'
 elif task == 'onesmallstep':
-    data_dir_func = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/ISC_Data_cut/NuisanceRegressed'
+    data_dir_func = f'{base_dir}/outputs/{task}/data/nuisance_regressed_cut'
 else:
     raise ValueError('Invalid task')
 func_fns = glob(join(data_dir_func, 'P?.nii.gz')) + glob(join(data_dir_func, 'N?.nii.gz')) + \
            glob(join(data_dir_func, 'VR?.nii.gz')) + glob(join(data_dir_func, 'P??.nii.gz')) + \
            glob(join(data_dir_func, 'N??.nii.gz')) + glob(join(data_dir_func, 'VR??.nii.gz'))
+n_subj = len(func_fns)
 
-if task == 'toystory':
-    # remove VR7 and 8 temporarily for testing because they are 295 not 300 TRs
-    func_fns = [fn for fn in func_fns if 'VR7' not in fn and 'VR8' not in fn]
-    label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Toy_Story_Labelled'
-elif task == 'onesmallstep':
-    label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/OSS_Labelled'
+# if task == 'toystory':
+#     # remove VR7 and 8 temporarily for testing because they are 295 not 300 TRs
+#     func_fns = [fn for fn in func_fns if 'VR7' not in fn and 'VR8' not in fn]
+#     label_dir = '/Volumes/BCI/Ambivalent_Affect/fMRI_Study/VideoLabelling/Toy_Story_Labelled'
+# elif task == 'onesmallstep':
+#     label_dir = f'{base_dir}/VideoLabelling/'
 
 subj_ids = [str(subj).split('/')[-1].split('.')[0] for subj in func_fns]  # assume BIDS format
 subj_ids.sort()
 
-roi_mask_path = '/Volumes/BCI/Ambivalent_Affect/rois'
+scripts_path = f'{base_dir}/isc_scripts'
+data_path = f'{base_dir}/outputs/{task}/data'
+figure_path = f'{base_dir}/outputs/{task}/figures'
+
+roi_mask_path = f'{scripts_path}/rois'
 all_roi_fpaths = glob(os.path.join(roi_mask_path, '*.nii*'))
 all_roi_masker = get_rois(all_roi_fpaths)
-data_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/data/{task}'
-figure_path = f'/Volumes/BCI/Ambivalent_Affect/RishabISC/ISC/figures/{task}'
-parc_path = f"{data_path}/../rois/schaefer_2018/Schaefer2018_1000Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
 mask_path = f"{data_path}/mask_img.npy"
 isc_path = f"{data_path}/isc_sliding_{pairwise_name}_n{len(subj_ids)}_{avg_over_roi_name}_roi{len(roi_selected)}_" \
            f"window{window_size}_step{step_size}.pkl"
-sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_size{window_size}_step{step_size}"
+sliding_perm_path = f"{data_path}/sliding_isc/permutations/phaseshift_{n_subj}subj_size{window_size}_step{step_size}"
 if parcellate:
     assert avg_over_roi is False
-    sliding_perm_path += "parcellated"
     n_parcels = 1000
-    masked_parc = load_schaeffer1000(parc_path, mask_path)
-
+    sliding_perm_path += "{n_parcels}parcels"
+    parc_path = f"{scripts_path}/schaefer_2018/Schaefer2018_{n_parcels}Parcels_17Networks_order_FSLMNI152_2mm.nii.gz"
+    _, masked_parc = load_schaeffer1000(parc_path, mask_path)
 
 # -------------------------------
 # Compute and save ISC

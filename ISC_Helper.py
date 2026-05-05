@@ -20,6 +20,7 @@ import time
 import nibabel as nib
 import numpy as np
 from nilearn.maskers import NiftiMasker
+from scipy.signal import hilbert
 from scipy.stats import pearsonr
 
 # from ISC.scripts.Group_ISC_toystory import func_fns
@@ -390,6 +391,109 @@ def _compute_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True,
             data_window = np.transpose(data_window, [1, 0, 2])  # becomes (n_voxels, window_size, n_subjects)
         slide_isc.append(isc(data_window, pairwise=pairwise, summary_statistic=summary_statistic, tolerate_nans=tolerate_nans))
     return np.array(slide_isc)
+
+def _compute_isps(data, assume_narrowband=False):
+    """
+    Compute intersubject phase synchrony via Phase Locking Value (PLV).
+
+    Parameters
+    ----------
+    data : ndarray (n_TRs, n_voxels, n_subjects)
+        fMRI time series. MUST be bandpass-filtered to a narrow frequency
+        band before calling (Glerean et al. 2012 recommend 0.04–0.07 Hz for
+        naturalistic fMRI). Broadband input produces meaningless phase estimates.
+    assume_narrowband : bool, default False
+        Acknowledgment that the caller has bandpass-filtered the input.
+        Must be True to run.
+
+    Returns
+    -------
+    isps : ndarray (n_TRs, n_voxels)
+        Instantaneous phase synchrony (PLV) in [0, 1].
+    """
+    if not assume_narrowband:
+        raise ValueError(
+            "ISPS requires narrowband input. Bandpass-filter your data "
+            "(e.g. 0.04–0.07 Hz; Glerean et al. 2012) and pass "
+            "assume_narrowband=True to confirm."
+        )
+    phase = np.angle(hilbert(data, axis=0))
+    return np.abs(np.mean(np.exp(1j * phase), axis=-1))
+
+
+def compute_isps(roi_selected, all_roi_masker, func_fns, data_path, assume_narrowband=False):
+    """
+    Compute ISPS for a list of ROIs. Data must be bandpass-filtered; see _compute_isps.
+
+    Returns
+    -------
+    dict[str -> ndarray (n_TRs, n_voxels)]
+    """
+    isps_roi_selected = {}
+    for j, roi_name in enumerate(roi_selected):
+        print(j, roi_name)
+        bold_roi = load_roi_data(roi_name, all_roi_masker, func_fns, data_path=data_path)
+        isps_roi_selected[roi_name] = _compute_isps(bold_roi, assume_narrowband=assume_narrowband)
+    return isps_roi_selected
+
+
+def _compute_isps_behav_corr(isps, behav_consensus):
+    """
+    Pearson r between ISPS and behavioral consensus at each voxel.
+
+    Parameters
+    ----------
+    isps : ndarray (n_trs, n_voxels)
+    behav_consensus : ndarray (n_trs, n_emotions)
+
+    Returns
+    -------
+    r : ndarray (n_voxels, n_emotions)
+    """
+    isps_z = (isps - isps.mean(axis=0)) / isps.std(axis=0)
+    behav_z = (behav_consensus - behav_consensus.mean(axis=0)) / behav_consensus.std(axis=0)
+    return (isps_z.T @ behav_z) / isps.shape[0]
+
+
+def _compute_phaseshift_isps(data, n_shifts=1000, random_state=None):
+    """
+    Phase-randomization null distribution for ISPS.
+
+    Applies Fourier-domain phase randomization (same approach as
+    _compute_phaseshift_sliding_isc) to break inter-subject coherence
+    while preserving the power spectrum of each subject's time series.
+
+    Parameters
+    ----------
+    data : ndarray (n_TRs, n_voxels, n_subjects)
+        Bandpass-filtered BOLD data (narrowband).
+    n_shifts : int, default 1000
+        Number of phase-randomization iterations.
+    random_state : int, None, or np.random.RandomState
+
+    Returns
+    -------
+    observed : ndarray (n_TRs, n_voxels)
+        Observed ISPS (no phase randomization).
+    distribution : ndarray (n_shifts, n_TRs, n_voxels)
+        ISPS computed on each phase-randomized dataset.
+    """
+    data, n_TRs, n_voxels, n_subjects = _check_timeseries_input(data)
+    observed = _compute_isps(data, assume_narrowband=True)
+
+    if isinstance(random_state, np.random.RandomState):
+        prng = random_state
+    else:
+        prng = np.random.RandomState(random_state)
+
+    distribution = []
+    for i in np.arange(n_shifts):
+        shifted_data = phase_randomize(data, random_state=prng)
+        distribution.append(_compute_isps(shifted_data, assume_narrowband=True))
+        random_state = np.random.RandomState(prng.randint(0, MAX_RANDOM_SEED))
+
+    return observed, np.stack(distribution)
+
 
 # @profile_function
 def _compute_phaseshift_sliding_isc(data, n_trs, window_size, step_size, avg_over_roi=True, spatial=False,
