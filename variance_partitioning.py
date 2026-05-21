@@ -1,44 +1,36 @@
 """
-Variance partitioning of ISPS by emotion consensus (positive, negative, mixed).
+Two-stage variance partitioning of ISPS by emotion consensus (P, N, M).
 
-Fits all 7 subset RidgeCV models and applies inclusion-exclusion to decompose
-R²(PNM) into unique and shared components per parcel. Permutation testing
-uses phase-shifted ISPS null distributions.
+Stage 1 (already on disk, produced by isps.py): per-emotion FDR test of ridge
+coefficients vs phase-shift null. Outputs:
+  - isps_emotion_pvals_corrected.nii.gz  (3 vols: per-emotion p_fdr)
+  - isps_emotion_betas_corrected.nii.gz  (3 vols: per-emotion thresholded β)
+
+Stage 2 (this script): for each emotion E, within E's Stage-1 mask M_E only,
+test whether U_E := R²(PNM) − R²(\\E) is greater than the phase-shift null,
+FDR-correcting across the parcels in M_E. A parcel "supports the unique-
+variance claim" for E iff it survives Stage 1 AND Stage 2.
 
 Analysis decisions
 ------------------
-- Alpha range   : np.logspace(-3, 3, 20)  — 20 log-spaced values 0.001–1000;
-                  same range as ridge.py; covers typical neuroimaging data scale.
-- R² metric     : Cross-validated R² (5-fold) with per-target optimal alpha.
-                  Step 1: RidgeCV selects best_alphas_ per target on full data.
-                  Step 2: K-fold CV with Ridge(best_alphas_) gives unbiased R².
-                  CV R² used for BOTH observed and permuted data so the null is
-                  properly centered. In-sample R² inflates the null (tested and
-                  rejected: null mean ~0.01 vs observed mean ~0.017, null std ~0.044
-                  — no parcels survive FDR correction with in-sample R²).
-- CV folds      : 5 for both alpha selection and R² estimation (n≈90/fold from 454 TRs).
-- Permutation α : Per-target best_alphas_ from each observed subset fit, fixed for
-                  permutations (no re-selecting alpha per permutation). Justified:
-                  the alpha controls regularization, not direction of the statistic;
-                  phase-shuffled null CV R² is properly centered near 0 with fixed
-                  alpha. Avoids running RidgeCV 4096× for permutations.
-- fit_intercept : True — emotion consensus variance is always non-negative.
-- Components    : 7 Venn regions (3 unique + 3 pairwise-shared + 1 triple-shared).
-                  Only unique components are permutation-tested; shared are
-                  descriptive (can be negative via suppression).
-- N permutations: 1024 (matches existing ISPS phase-shift null).
-- FDR threshold : 0.05 (BH), consistent with ridge.py.
-- Sig mask      : Union of parcels FDR-significant for ANY emotion in
-                  isps_emotion_pvals_corrected.nii.gz (produced by isps.py,
-                  which tests ridge coefficients — properly centered at 0 under
-                  the phase-shift null). Unique components are FDR-corrected
-                  only within this mask, reducing the multiple comparison
-                  burden from 1000 to mask.sum() and increasing power. Parcels
-                  outside the mask receive p_fdr=1.0 in output. A consistency
-                  assertion confirms that the FDR-significant set in
-                  isps_emotion_pvals_corrected matches the nonzero set in
-                  isps_emotion_betas_corrected (must agree by isps.py
-                  construction).
+- Alpha grid       : np.logspace(-3, 3, 20)
+- Alpha selection  : RidgeCV per-target on the FULL (PNM) model only.
+                     The selected per-parcel alpha is then applied to all 7
+                     subset Ridge fits — observed and permuted — so that
+                     U_E reflects which predictors were available, not how
+                     each sub-model was regularized.
+- R² metric        : Cross-validated R² (5-fold) with Ridge(alpha=best_α).
+- CV folds         : 5 (alpha selection in PNM RidgeCV and outer R² CV).
+- Components       : 7 Borcard inclusion-exclusion components per parcel.
+                     Only unique components are permutation-tested; the
+                     pairwise- and triple-shared components are descriptive
+                     (can be negative under suppression).
+- N permutations   : 1024 (reuses the existing phase-shift pickle).
+- Stage-1 mask     : per-emotion (M_P, M_N, M_M), each = parcels with
+                     p_fdr_E < 0.05 in isps_emotion_pvals_corrected.nii.gz.
+                     A runtime assertion confirms the per-emotion FDR mask
+                     matches the per-emotion nonzero-beta mask.
+- Stage-2 FDR      : BH within M_E only. Parcels outside M_E receive p_fdr=1.
 """
 
 import os
@@ -70,8 +62,14 @@ SUBSETS = {
     'PNM': [0, 1, 2],
 }
 
-# The 4 subsets needed to compute the 3 unique components
-PERM_SUBSETS = ['PNM', 'NM', 'PM', 'PN']
+# All 7 subsets are now needed to compute the 6 unique-variance components
+# (3 single-emotion + 3 pair):
+#   U_P  = R²(PNM) - R²(NM)     U_PN = R²(PNM) - R²(M)
+#   U_N  = R²(PNM) - R²(PM)     U_PM = R²(PNM) - R²(N)
+#   U_M  = R²(PNM) - R²(PN)     U_NM = R²(PNM) - R²(P)
+PERM_SUBSETS = ['P', 'N', 'M', 'PN', 'PM', 'NM', 'PNM']
+
+UNIQUE_KEYS = ['U_P', 'U_N', 'U_M', 'U_PN', 'U_PM', 'U_NM']
 
 
 def load_vp_data(task='onesmallstep', base_dir=BASE_DIR):
@@ -111,28 +109,23 @@ def _cv_r2_fixed_alpha(X, Y, cols, best_alphas, n_splits=CV_FOLDS):
     return r2_folds.mean(axis=0)
 
 
-def fit_subset_r2(X, Y, cols, alphas=ALPHAS, cv=CV_FOLDS):
-    """Fit himalaya RidgeCV to select alpha, then compute K-fold CV R².
+def fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=CV_FOLDS):
+    """RidgeCV on the PNM model only. Returns per-target best_alphas (n_targets,).
 
-    Two-stage: RidgeCV selects per-target alpha on full data; K-fold CV with
-    Ridge(best_alphas_) gives unbiased R² estimates. Returns (cv_r2, best_alphas).
+    The returned per-parcel alpha is reused for every subset fit (observed and
+    permuted) so that U_E = R²(PNM) − R²(\\E) is not confounded by the two
+    sub-models being shrunk differently.
     """
     model = RidgeCV(alphas=alphas, cv=cv, fit_intercept=True)
-    model.fit(X[:, cols], Y)
-    best_alphas = model.best_alphas_
-    r2 = _cv_r2_fixed_alpha(X, Y, cols, best_alphas, n_splits=cv)
-    return r2, best_alphas
+    model.fit(X[:, SUBSETS['PNM']], Y)
+    return np.array(model.best_alphas_)
 
 
-def compute_all_subset_r2s(X, Y, alphas=ALPHAS, cv=CV_FOLDS):
-    """Fit all 7 subset models. Returns r2_dict and alpha_dict, each {name → (n_targets,)}."""
-    r2_dict, alpha_dict = {}, {}
-    for name, cols in SUBSETS.items():
-        print(f'  Fitting subset {name}...')
-        r2, best_alphas = fit_subset_r2(X, Y, cols, alphas, cv)
-        r2_dict[name] = np.array(r2)
-        alpha_dict[name] = np.array(best_alphas)
-    return r2_dict, alpha_dict
+def compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas, cv=CV_FOLDS):
+    """All 7 subsets, K-fold CV R² with Ridge(alpha=best_alphas). Returns
+    {subset_name → (n_targets,)}."""
+    return {name: _cv_r2_fixed_alpha(X, Y, cols, best_alphas, n_splits=cv)
+            for name, cols in SUBSETS.items()}
 
 
 def compute_vp_components(r2_dict):
@@ -164,31 +157,46 @@ def compute_vp_components(r2_dict):
     }
 
 
-def fit_subset_r2_fixed_alpha(X, Y, cols, best_alphas, n_splits=CV_FOLDS):
-    """K-fold CV R² using Ridge with fixed per-target alpha. Wrapper around _cv_r2_fixed_alpha."""
-    return _cv_r2_fixed_alpha(X, Y, cols, best_alphas, n_splits=n_splits)
-
-
-def run_permutation_vp(X, Y_perms, alpha_dict):
+def compute_unique_r2(r2_dict):
     """
-    Compute unique VP components for each phase-shifted ISPS permutation.
+    Six unique-variance components: U_S := R²(PNM) − R²(complement of S).
+    Returns {key → (n_targets,)} for keys in UNIQUE_KEYS.
 
-    Uses K-fold CV R² with fixed per-target alpha (from observed subset fits) so the
-    null is properly centered. Returns {unique_P/N/M → null (n_perms, n_targets)}.
+    For single-emotion S, the complement is the size-2 leave-one-out subset
+    (so U_P = R²(PNM)−R²(NM), the unique contribution of P). For pair S, the
+    complement is the size-1 left-out subset (so U_PN = R²(PNM)−R²(M), the
+    variance only the {P,N} pair can explain beyond M alone).
+    """
+    PNM = r2_dict['PNM']
+    return {
+        'U_P':  PNM - r2_dict['NM'],
+        'U_N':  PNM - r2_dict['PM'],
+        'U_M':  PNM - r2_dict['PN'],
+        'U_PN': PNM - r2_dict['M'],
+        'U_PM': PNM - r2_dict['N'],
+        'U_NM': PNM - r2_dict['P'],
+    }
+
+
+def run_permutation_vp(X, Y_perms, best_alphas):
+    """
+    Compute null distributions for the 6 unique-variance components.
+
+    For each phase-shifted Y, refit all 7 subsets with Ridge(alpha=best_alphas)
+    — same per-target α used for the observed fits — and form U_S for each of
+    the 6 keys in UNIQUE_KEYS. Returns {key → (n_perms, n_targets)}.
     """
     n_perms = Y_perms.shape[0]
     n_targets = Y_perms.shape[2]
-    null = {k: np.empty((n_perms, n_targets))
-            for k in ['unique_P', 'unique_N', 'unique_M']}
+    null = {k: np.empty((n_perms, n_targets)) for k in UNIQUE_KEYS}
 
     for i in tqdm(range(n_perms), desc='Permutations'):
         Y_perm = Y_perms[i]   # (n_trs, n_targets)
-        r2 = {}
-        for name in PERM_SUBSETS:
-            r2[name] = fit_subset_r2_fixed_alpha(X, Y_perm, SUBSETS[name], alpha_dict[name])
-        null['unique_P'][i] = r2['PNM'] - r2['NM']
-        null['unique_N'][i] = r2['PNM'] - r2['PM']
-        null['unique_M'][i] = r2['PNM'] - r2['PN']
+        r2 = {name: _cv_r2_fixed_alpha(X, Y_perm, SUBSETS[name], best_alphas)
+              for name in PERM_SUBSETS}
+        unique = compute_unique_r2(r2)
+        for k in UNIQUE_KEYS:
+            null[k][i] = unique[k]
 
     return null
 
@@ -198,7 +206,7 @@ def compute_significance(obs, null, side='two-sided'):
     Compute p-values and FDR-corrected q-values.
 
     obs: (n_targets,); null: (n_perms, n_targets).
-    side: 'two-sided' for unique components; 'right' for full-model R²(PNM).
+    side: 'two-sided' for unique components.
     Returns p_raw (n_targets,), p_fdr (n_targets,).
     """
     p_raw = p_from_null(obs, null, side=side, exact=False, axis=0)
@@ -236,9 +244,15 @@ def load_isps_betas_per_parcel(betas_path, parc_path, n_parcels=1000):
     return _load_parcel_values_from_4d(betas_path, parc_path, n_parcels)
 
 
-def compute_beta_sig_mask(p_fdr_per_parcel, alpha=0.05):
-    """sig_mask[p] = True iff ANY emotion's FDR p-value at parcel p is < alpha."""
-    return np.any(p_fdr_per_parcel < alpha, axis=1)
+def compute_per_emotion_masks(p_fdr_per_parcel, alpha=0.05):
+    """Per-emotion Stage-1 masks: {'P','N','M' → bool mask (n_parcels,)}.
+
+    Mask M_E[p] = True iff the FDR-corrected p-value for emotion E at parcel p
+    is strictly less than alpha. No union across emotions — Stage 2 inference
+    for E uses M_E directly.
+    """
+    return {e: p_fdr_per_parcel[:, i] < alpha
+            for i, e in enumerate(['P', 'N', 'M'])}
 
 
 def _parcels_to_nifti(data, parc_img, n_parcels):
@@ -252,45 +266,88 @@ def _parcels_to_nifti(data, parc_img, n_parcels):
     return nib.Nifti1Image(vol.squeeze(), parc_img.affine)
 
 
-def save_vp_nifti(vp_components, p_fdr_dict, sig_mask, parc_path, out_dir,
-                  n_parcels=1000):
-    """Write 5 NIfTI files for VP results."""
+VP_NIFTI_MANIFEST = {
+    'vp_stage1_masks.nii': {
+        'units': 'binary (0 or 1)',
+        'meaning': 'Stage-1 per-emotion FDR mask from isps.py (β_E ≠ 0 after FDR).',
+        'volume_order': ['P', 'N', 'M'],
+    },
+    'vp_unique_r2_raw.nii': {
+        'units': 'ΔR² (cross-validated, 5-fold)',
+        'meaning': 'Raw U_S := R²(PNM) − R²(complement(S)) across all 1000 parcels. '
+                   'Can be negative under CV (overfitting in reduced model).',
+        'volume_order': ['U_P', 'U_N', 'U_M', 'U_PN', 'U_PM', 'U_NM'],
+        'definitions': {
+            'U_P':  'R²(PNM) − R²(NM)',
+            'U_N':  'R²(PNM) − R²(PM)',
+            'U_M':  'R²(PNM) − R²(PN)',
+            'U_PN': 'R²(PNM) − R²(M)',
+            'U_PM': 'R²(PNM) − R²(N)',
+            'U_NM': 'R²(PNM) − R²(P)',
+        },
+    },
+    'vp_pvals_corrected.nii': {
+        'units': 'FDR-corrected q-value (BH); 1.0 outside Stage-1 mask',
+        'meaning': 'Stage-2 q within each component\'s Stage-1 mask. '
+                   'Single-emotion mask = isps.py FDR; pair mask = union of the two single-emotion masks.',
+        'volume_order': ['U_P', 'U_N', 'U_M', 'U_PN', 'U_PM', 'U_NM'],
+    },
+    'vp_unique_r2_thresholded.nii': {
+        'units': 'ΔR² (cross-validated, 5-fold), zero outside two-stage-significant parcels',
+        'meaning': 'U_S where (Stage-1 mask AND Stage-2 q<0.05), 0 elsewhere.',
+        'volume_order': ['U_P', 'U_N', 'U_M', 'U_PN', 'U_PM', 'U_NM'],
+    },
+    'vp_all_components.nii': {
+        'units': 'R² (cross-validated, 5-fold) component value',
+        'meaning': 'Borcard (1992) inclusion-exclusion partition of R²(PNM). '
+                   'Sum of all 7 components per parcel equals R²(PNM). '
+                   'Shared components can be negative (suppression).',
+        'volume_order': ['unique_P', 'unique_N', 'unique_M',
+                         'shared_PN', 'shared_PM', 'shared_NM', 'shared_PNM'],
+    },
+}
+
+
+def save_vp_nifti(vp_components, obs_unique, p_fdr_dict, masks,
+                  component_masks, parc_path, out_dir, n_parcels=1000):
+    """Write NIfTI files for two-stage VP results, plus a sidecar manifest.
+
+    See VP_NIFTI_MANIFEST for the units, meaning, and volume order of each
+    output file. A JSON copy of the manifest is written to
+    vp_outputs_manifest.json alongside the NIfTIs, and each NIfTI's header
+    `descrip` field gets a short reminder of the volume ordering.
+    """
+    import json
+
     parc_img = nib.load(parc_path)
     emotions = ['P', 'N', 'M']
 
-    # ISPS beta-FDR union mask  (1 volume, binary)
-    nib.save(_parcels_to_nifti(sig_mask.astype(float), parc_img, n_parcels),
-             os.path.join(out_dir, 'vp_isps_beta_sig_mask.nii'))
+    def _write(arr, fname):
+        img = _parcels_to_nifti(arr, parc_img, n_parcels)
+        order = VP_NIFTI_MANIFEST[fname]['volume_order']
+        # NIfTI descrip is limited to ~80 chars
+        img.header['descrip'] = np.bytes_(f'vols:{",".join(order)}'[:79])
+        nib.save(img, os.path.join(out_dir, fname))
 
-    # Raw unique R²  (3 volumes, all parcels)
-    raw = np.column_stack([vp_components[f'unique_{e}'] for e in emotions])
-    nib.save(_parcels_to_nifti(raw, parc_img, n_parcels),
-             os.path.join(out_dir, 'vp_unique_r2_raw.nii'))
+    _write(np.column_stack([masks[e].astype(float) for e in emotions]),
+           'vp_stage1_masks.nii')
+    _write(np.column_stack([obs_unique[k] for k in UNIQUE_KEYS]),
+           'vp_unique_r2_raw.nii')
+    _write(np.column_stack([p_fdr_dict[k] for k in UNIQUE_KEYS]),
+           'vp_pvals_corrected.nii')
+    _write(np.column_stack([
+        np.where(component_masks[k] & (p_fdr_dict[k] < 0.05), obs_unique[k], 0.0)
+        for k in UNIQUE_KEYS
+    ]), 'vp_unique_r2_thresholded.nii')
+    _write(np.column_stack([vp_components[k] for k in
+                            ['unique_P', 'unique_N', 'unique_M',
+                             'shared_PN', 'shared_PM', 'shared_NM', 'shared_PNM']]),
+           'vp_all_components.nii')
 
-    # FDR q-values  (3 volumes; 1.0 outside sig_mask)
-    pvals = np.column_stack([p_fdr_dict[f'unique_{e}'] for e in emotions])
-    nib.save(_parcels_to_nifti(pvals, parc_img, n_parcels),
-             os.path.join(out_dir, 'vp_pvals_corrected.nii'))
-
-    # Thresholded unique R²  (3 volumes: nonzero only where full-model AND unique-component sig)
-    thresh = np.column_stack([
-        np.where(
-            sig_mask & (p_fdr_dict[f'unique_{e}'] < 0.05),
-            vp_components[f'unique_{e}'], 0.0
-        )
-        for e in emotions
-    ])
-    nib.save(_parcels_to_nifti(thresh, parc_img, n_parcels),
-             os.path.join(out_dir, 'vp_unique_r2_thresholded.nii'))
-
-    # All 7 components  (7 volumes, descriptive)
-    all_names = ['unique_P', 'unique_N', 'unique_M',
-                 'shared_PN', 'shared_PM', 'shared_NM', 'shared_PNM']
-    all_comp = np.column_stack([vp_components[k] for k in all_names])
-    nib.save(_parcels_to_nifti(all_comp, parc_img, n_parcels),
-             os.path.join(out_dir, 'vp_all_components.nii'))
-
-    print('Saved NIfTI files to', out_dir)
+    manifest_path = os.path.join(out_dir, 'vp_outputs_manifest.json')
+    with open(manifest_path, 'w') as f:
+        json.dump(VP_NIFTI_MANIFEST, f, indent=2)
+    print(f'Saved NIfTI files + manifest to {out_dir}')
 
 
 def main():
@@ -301,8 +358,14 @@ def main():
     print('=== Loading data ===')
     X, Y, Y_perms = load_vp_data(task)
 
-    print('\n=== Fitting 7 observed subset models ===')
-    r2_dict, alpha_dict = compute_all_subset_r2s(X, Y)
+    print('\n=== Fitting PNM RidgeCV to select per-parcel alpha ===')
+    best_alphas_pnm = fit_pnm_alpha(X, Y)
+    print(f'  PNM alpha distribution across parcels: '
+          f'min={best_alphas_pnm.min():.3g}, median={np.median(best_alphas_pnm):.3g}, '
+          f'max={best_alphas_pnm.max():.3g}')
+
+    print('\n=== Fitting 7 observed subset models at fixed (PNM-selected) alpha ===')
+    r2_dict = compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas_pnm)
 
     print('\n=== Computing VP components ===')
     vp = compute_vp_components(r2_dict)
@@ -314,7 +377,7 @@ def main():
     for k, v in vp.items():
         print(f'  {k}: mean={v.mean():.4f}')
 
-    print('\n=== Loading ISPS beta-FDR mask from isps.py outputs ===')
+    print('\n=== Loading Stage-1 per-emotion masks from isps.py outputs ===')
     pvals_path = f'{data_dir}/isps_emotion_pvals_corrected.nii.gz'
     betas_path = f'{data_dir}/isps_emotion_betas_corrected.nii.gz'
     p_fdr_per_parcel = load_isps_pvals_per_parcel(pvals_path, parc_path)
@@ -324,35 +387,96 @@ def main():
     assert np.array_equal(mask_from_pvals, mask_from_betas), (
         'isps_emotion_pvals_corrected.nii.gz and isps_emotion_betas_corrected.nii.gz '
         'disagree: FDR-significant p-values must coincide with nonzero betas.')
-    sig_mask = compute_beta_sig_mask(p_fdr_per_parcel, alpha=0.05)
-    n_full_sig = sig_mask.sum()
-    print(f'  Union FDR-significant (any emotion): {n_full_sig} / {len(sig_mask)} parcels')
-    for e_idx, e in enumerate(['P', 'N', 'M']):
-        n_e = mask_from_pvals[:, e_idx].sum()
-        print(f'    {e}: {n_e} parcels FDR-significant')
-
-    print('\n=== Running permutation test (1024 perms) ===')
-    null = run_permutation_vp(X, Y_perms, alpha_dict)
-
-    print('\n=== Computing unique component significance (within sig_mask) ===')
-    p_fdr_dict = {}
+    masks = compute_per_emotion_masks(p_fdr_per_parcel, alpha=0.05)
     for e in ['P', 'N', 'M']:
-        key = f'unique_{e}'
-        p_fdr_full = np.ones(len(sig_mask))   # non-sig parcels get p=1
-        if n_full_sig > 0:
-            obs_m  = vp[key][sig_mask]
-            null_m = null[key][:, sig_mask]
+        print(f'  Stage-1 mask {e}: {int(masks[e].sum())} / {len(masks[e])} parcels')
+
+    print('\n=== Computing observed unique-variance components (6 sub-models) ===')
+    obs_unique = compute_unique_r2(r2_dict)
+    for k in UNIQUE_KEYS:
+        print(f'  {k}: mean={obs_unique[k].mean():.4f}')
+
+    print('\n=== Building Stage-1 masks for all 6 sub-models ===')
+    # Single-emotion sub-models keep their isps.py FDR mask.
+    # Pair sub-models gate on the union of the two constituent single-emotion masks.
+    component_masks = {
+        'U_P':  masks['P'],
+        'U_N':  masks['N'],
+        'U_M':  masks['M'],
+        'U_PN': masks['P'] | masks['N'],
+        'U_PM': masks['P'] | masks['M'],
+        'U_NM': masks['N'] | masks['M'],
+    }
+    for k in UNIQUE_KEYS:
+        print(f'  Stage-1 mask {k}: {int(component_masks[k].sum())} / {len(component_masks[k])} parcels')
+
+    print('\n=== Running permutation test (1024 perms × 7 subset fits) ===')
+    null = run_permutation_vp(X, Y_perms, best_alphas_pnm)
+
+    print('\n=== Stage 2: per-component FDR within Stage-1 mask ===')
+    p_fdr_dict = {}
+    for key in UNIQUE_KEYS:
+        m = component_masks[key]
+        p_fdr_full = np.ones(len(m))
+        if m.sum() > 0:
+            obs_m  = obs_unique[key][m]
+            null_m = null[key][:, m]
             p_raw_m, _ = compute_significance(obs_m, null_m, side='two-sided')
             _, p_fdr_m, _, _ = multipletests(p_raw_m, alpha=0.05, method='fdr_bh')
-            p_fdr_full[sig_mask] = p_fdr_m
+            p_fdr_full[m] = p_fdr_m
         p_fdr_dict[key] = p_fdr_full
-        n_sig = np.sum(p_fdr_full < 0.05)
-        mean_r2_sig = vp[key][p_fdr_full < 0.05].mean() if n_sig > 0 else float('nan')
-        print(f'  {key}: {n_sig} significant parcels (FDR<0.05 within mask), '
-              f'mean unique R²={mean_r2_sig:.4f}')
+        both = (p_fdr_full < 0.05) & m
+        n_both = int(both.sum())
+        mean_in_both = obs_unique[key][both].mean() if n_both else float('nan')
+        print(f'  {key}: stage1={int(m.sum())}, stage2-sig={n_both} (both stages, FDR<0.05); '
+              f'mean U in both={mean_in_both:.4f}')
 
-    print('\n=== Saving NIfTI maps ===')
-    save_vp_nifti(vp, p_fdr_dict, sig_mask, parc_path, data_dir)
+    print('\n=== Saving NIfTI maps + manifest + inspection pickle ===')
+    save_vp_nifti(vp, obs_unique, p_fdr_dict, masks, component_masks,
+                  parc_path, data_dir)
+
+    obs_null_path = os.path.join(data_dir, 'vp_obs_null.pkl')
+    pickle_payload = {
+        'obs':              obs_unique,        # {key → (n_parcels,)} observed U_S, units = ΔR² CV
+        'null':             null,              # {key → (n_perms, n_parcels)} phase-shift null U_S
+        'masks':            masks,             # {'P','N','M' → bool (n_parcels,)} Stage-1 single-emotion masks
+        'component_masks':  component_masks,   # {key → bool (n_parcels,)} Stage-1 mask used for each sub-model
+        'p_fdr':            p_fdr_dict,        # {key → (n_parcels,)} Stage-2 FDR q (1.0 outside Stage-1 mask)
+        'best_alphas_pnm':  best_alphas_pnm,   # (n_parcels,) per-parcel α from PNM RidgeCV
+        'unique_keys':      UNIQUE_KEYS,       # canonical key ordering for tables, plots, NIfTI volumes
+        'metadata': {
+            'description': (
+                'Two-stage variance partitioning of ISPS by emotion consensus (P, N, M). '
+                'Each U_S in obs/null is the unique R² contribution of sub-model S, defined as '
+                'R²(PNM) − R²(complement(S)) using 5-fold cross-validated R² with Ridge(alpha=best_alphas_pnm).'
+            ),
+            'units': {
+                'obs':             'ΔR² (cross-validated, 5-fold); can be negative under CV',
+                'null':            'ΔR² (cross-validated, 5-fold) under phase-randomized Y',
+                'masks':           'bool (Stage-1: isps.py per-emotion FDR mask, q<0.05)',
+                'component_masks': 'bool (Stage-1: single-emotion = M_E; pair = M_{E1} ∪ M_{E2})',
+                'p_fdr':           'FDR-corrected q-value (BH); 1.0 for parcels outside Stage-1 mask',
+                'best_alphas_pnm': 'Ridge α from RidgeCV on PNM (logspace(-3,3,20) grid)',
+            },
+            'definitions': {
+                'U_P':  'R²(PNM) − R²(NM)  — unique to P',
+                'U_N':  'R²(PNM) − R²(PM)  — unique to N',
+                'U_M':  'R²(PNM) − R²(PN)  — unique to M',
+                'U_PN': 'R²(PNM) − R²(M)   — unique to pair {P,N} beyond M',
+                'U_PM': 'R²(PNM) − R²(N)   — unique to pair {P,M} beyond N',
+                'U_NM': 'R²(PNM) − R²(P)   — unique to pair {N,M} beyond P',
+            },
+            'n_perms':         null['U_P'].shape[0],
+            'n_parcels':       null['U_P'].shape[1],
+            'cv_folds':        CV_FOLDS,
+            'alpha_grid':      ALPHAS.tolist(),
+            'stage1_alpha':    0.05,
+            'stage2_alpha':    0.05,
+        },
+    }
+    with open(obs_null_path, 'wb') as f:
+        pickle.dump(pickle_payload, f)
+    print(f'Saved obs/null pickle to {obs_null_path}')
     print('Done.')
 
 

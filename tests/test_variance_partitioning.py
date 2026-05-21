@@ -7,13 +7,16 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from variance_partitioning import (
-    fit_subset_r2,
-    compute_all_subset_r2s,
+    ALPHAS as _ALPHAS_FULL,
+    SUBSETS,
+    UNIQUE_KEYS,
+    fit_pnm_alpha,
+    compute_all_subset_r2s_fixed_alpha,
+    compute_unique_r2,
     compute_vp_components,
-    fit_subset_r2_fixed_alpha,
     run_permutation_vp,
     compute_significance,
-    compute_beta_sig_mask,
+    compute_per_emotion_masks,
     load_isps_pvals_per_parcel,
     load_isps_betas_per_parcel,
 )
@@ -26,22 +29,6 @@ PARC_PATH = f'{BASE_DIR}/isc_scripts/schaefer_2018/Schaefer2018_1000Parcels_17Ne
 RNG = np.random.RandomState(42)
 N_SAMPLES, N_TARGETS = 100, 20
 ALPHAS = np.logspace(-3, 3, 10)
-
-
-@pytest.fixture
-def orthogonal_data():
-    """Three orthogonal predictors, each independently predicts a different target group."""
-    rng = np.random.RandomState(0)
-    X = np.zeros((N_SAMPLES, 3))
-    X[:, 0] = rng.randn(N_SAMPLES)
-    X[:, 1] = rng.randn(N_SAMPLES)
-    X[:, 2] = rng.randn(N_SAMPLES)
-    # Orthogonalize
-    X[:, 1] -= X[:, 0] * (X[:, 0] @ X[:, 1]) / (X[:, 0] @ X[:, 0])
-    X[:, 2] -= X[:, 0] * (X[:, 0] @ X[:, 2]) / (X[:, 0] @ X[:, 0])
-    X[:, 2] -= X[:, 1] * (X[:, 1] @ X[:, 2]) / (X[:, 1] @ X[:, 1])
-    Y = X[:, 0:1] * 3 + rng.randn(N_SAMPLES, N_TARGETS) * 0.1
-    return X, Y
 
 
 @pytest.fixture
@@ -63,17 +50,41 @@ def identical_pn_data():
     return X, Y
 
 
-def test_fit_subset_r2_output_shape():
+def test_fit_pnm_alpha_returns_per_target_alphas_from_grid():
+    """fit_pnm_alpha returns (n_targets,) array; every value must be drawn from
+    the supplied alpha grid (RidgeCV selects from the grid, not interpolates)."""
     X = RNG.randn(N_SAMPLES, 3)
     Y = RNG.randn(N_SAMPLES, N_TARGETS)
-    r2, best_alphas = fit_subset_r2(X, Y, [0, 1, 2], ALPHAS, cv=3)
-    assert r2.shape == (N_TARGETS,), f"expected ({N_TARGETS},), got {r2.shape}"
-    assert best_alphas.shape == (N_TARGETS,)
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    assert best_alphas.shape == (N_TARGETS,), \
+        f'expected ({N_TARGETS},), got {best_alphas.shape}'
+    for a in best_alphas:
+        assert np.any(np.isclose(a, ALPHAS)), \
+            f'returned alpha {a} not in supplied grid {ALPHAS}'
+
+
+def test_compute_all_subset_r2s_fixed_alpha_returns_dict_per_subset(p_only_data):
+    """The function returns a dict keyed by every subset name in SUBSETS, each
+    value (n_targets,). R²(PNM) should beat R²(N) and R²(M) when P is the only
+    true predictor (sanity that the same per-target α is producing comparable
+    R²s across subsets — no per-subset re-CV)."""
+    X, Y = p_only_data
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    r2_dict = compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas, cv=3)
+    assert set(r2_dict.keys()) == set(SUBSETS.keys()), \
+        f'expected keys {set(SUBSETS.keys())}, got {set(r2_dict.keys())}'
+    for name, r2 in r2_dict.items():
+        assert r2.shape == (N_TARGETS,), f'{name}: shape {r2.shape}'
+    assert r2_dict['PNM'].mean() > r2_dict['N'].mean(), \
+        f"R²(PNM) {r2_dict['PNM'].mean():.3f} should exceed R²(N) {r2_dict['N'].mean():.3f}"
+    assert r2_dict['PNM'].mean() > r2_dict['M'].mean(), \
+        f"R²(PNM) {r2_dict['PNM'].mean():.3f} should exceed R²(M) {r2_dict['M'].mean():.3f}"
 
 
 def test_vp_components_sum_to_full_r2(p_only_data):
     X, Y = p_only_data
-    r2_dict, _ = compute_all_subset_r2s(X, Y, ALPHAS, cv=3)
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    r2_dict = compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas, cv=3)
     components = compute_vp_components(r2_dict)
     total = sum(components.values())
     assert np.allclose(total, r2_dict['PNM'], atol=1e-6), \
@@ -82,9 +93,9 @@ def test_vp_components_sum_to_full_r2(p_only_data):
 
 def test_unique_zero_when_predictors_identical(identical_pn_data):
     X, Y = identical_pn_data
-    r2_dict, _ = compute_all_subset_r2s(X, Y, ALPHAS, cv=3)
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    r2_dict = compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas, cv=3)
     components = compute_vp_components(r2_dict)
-    # When P == N, neither has unique variance above the other
     assert np.all(components['unique_P'] < 0.05), \
         f"unique_P should be ~0 when P==N, got mean={components['unique_P'].mean():.4f}"
     assert np.all(components['unique_N'] < 0.05), \
@@ -93,59 +104,83 @@ def test_unique_zero_when_predictors_identical(identical_pn_data):
 
 def test_unique_nonzero_when_only_predictor(p_only_data):
     X, Y = p_only_data
-    r2_dict, _ = compute_all_subset_r2s(X, Y, ALPHAS, cv=3)
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    r2_dict = compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas, cv=3)
     components = compute_vp_components(r2_dict)
-    # P is the only true predictor → unique_P should be large
     assert np.mean(components['unique_P']) > 0.3, \
         f"unique_P should be large when P is only predictor, got {np.mean(components['unique_P']):.4f}"
-    # N and M are noise → their unique components should be near zero
     assert np.mean(np.abs(components['unique_N'])) < 0.1, \
         f"unique_N should be ~0 when N is noise, got {np.mean(components['unique_N']):.4f}"
 
 
 def test_permutation_null_shape():
+    """run_permutation_vp returns a null distribution for each of the 6 unique
+    sub-model components (3 single-emotion + 3 pair). UNIQUE_KEYS pins the
+    canonical key set and ordering."""
     X = RNG.randn(N_SAMPLES, 3)
     Y = RNG.randn(N_SAMPLES, N_TARGETS)
     n_perms = 5
     Y_perms = RNG.randn(n_perms, N_SAMPLES, N_TARGETS)
-    _, alpha_dict = compute_all_subset_r2s(X, Y, ALPHAS, cv=3)
-    null = run_permutation_vp(X, Y_perms, alpha_dict)
-    for key in ['unique_P', 'unique_N', 'unique_M']:
-        assert key in null, f"missing key {key}"
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    null = run_permutation_vp(X, Y_perms, best_alphas)
+    assert set(null.keys()) == set(UNIQUE_KEYS), \
+        f'expected {set(UNIQUE_KEYS)}, got {set(null.keys())}'
+    assert UNIQUE_KEYS == ['U_P', 'U_N', 'U_M', 'U_PN', 'U_PM', 'U_NM'], \
+        f'UNIQUE_KEYS ordering drifted: {UNIQUE_KEYS}'
+    for key in UNIQUE_KEYS:
         assert null[key].shape == (n_perms, N_TARGETS), \
-            f"{key}: expected ({n_perms}, {N_TARGETS}), got {null[key].shape}"
+            f'{key}: expected ({n_perms}, {N_TARGETS}), got {null[key].shape}'
 
 
-def test_compute_beta_sig_mask_shape_and_logic():
-    """Union semantics: sig in any emotion → mask True; sig in none → False."""
+def test_compute_unique_r2_definitions(p_only_data):
+    """compute_unique_r2 must return exactly the 6 sub-model differences:
+    U_P = PNM-NM, U_N = PNM-PM, U_M = PNM-PN, U_PN = PNM-M, U_PM = PNM-N, U_NM = PNM-P."""
+    X, Y = p_only_data
+    best_alphas = fit_pnm_alpha(X, Y, alphas=ALPHAS, cv=3)
+    r2 = compute_all_subset_r2s_fixed_alpha(X, Y, best_alphas, cv=3)
+    unique = compute_unique_r2(r2)
+    assert set(unique.keys()) == set(UNIQUE_KEYS)
+    np.testing.assert_allclose(unique['U_P'],  r2['PNM'] - r2['NM'])
+    np.testing.assert_allclose(unique['U_N'],  r2['PNM'] - r2['PM'])
+    np.testing.assert_allclose(unique['U_M'],  r2['PNM'] - r2['PN'])
+    np.testing.assert_allclose(unique['U_PN'], r2['PNM'] - r2['M'])
+    np.testing.assert_allclose(unique['U_PM'], r2['PNM'] - r2['N'])
+    np.testing.assert_allclose(unique['U_NM'], r2['PNM'] - r2['P'])
+
+
+def test_compute_per_emotion_masks_shape_and_logic():
+    """Per-emotion masks: each is the strict-less-than-alpha boolean slice of
+    its emotion's column in p_fdr. No union across emotions."""
     p_fdr = np.array([
-        [0.01, 0.5,  0.5 ],   # sig in P only       → True
-        [0.5,  0.04, 0.5 ],   # sig in N only       → True
-        [0.5,  0.5,  0.02],   # sig in M only       → True
-        [0.5,  0.5,  0.5 ],   # sig in none         → False
-        [0.01, 0.02, 0.03],   # sig in all          → True
-        [0.05, 0.05, 0.05],   # boundary (not < α)  → False
+        [0.01, 0.5,  0.5 ],   # sig in P only
+        [0.5,  0.04, 0.5 ],   # sig in N only
+        [0.5,  0.5,  0.02],   # sig in M only
+        [0.5,  0.5,  0.5 ],   # sig in none
+        [0.01, 0.02, 0.03],   # sig in all
+        [0.05, 0.05, 0.05],   # boundary (not strictly < alpha)
     ])
-    mask = compute_beta_sig_mask(p_fdr, alpha=0.05)
-    expected = np.array([True, True, True, False, True, False])
-    assert mask.shape == (6,), f"expected (6,), got {mask.shape}"
-    assert mask.dtype == bool, f"expected bool, got {mask.dtype}"
-    assert np.array_equal(mask, expected), f"got {mask}, expected {expected}"
+    masks = compute_per_emotion_masks(p_fdr, alpha=0.05)
+    assert set(masks.keys()) == {'P', 'N', 'M'}, \
+        f"expected keys {{'P','N','M'}}, got {set(masks.keys())}"
+    for e in ['P', 'N', 'M']:
+        assert masks[e].shape == (6,), f'{e}: shape {masks[e].shape}'
+        assert masks[e].dtype == bool, f'{e}: dtype {masks[e].dtype}'
+    np.testing.assert_array_equal(masks['P'], np.array([True, False, False, False, True, False]))
+    np.testing.assert_array_equal(masks['N'], np.array([False, True, False, False, True, False]))
+    np.testing.assert_array_equal(masks['M'], np.array([False, False, True, False, True, False]))
 
 
 def _write_synthetic_parc_and_4d(tmp_path, parcel_values):
     """Build a tiny (4,4,4) parc NIfTI with labels 1..n and a 4D NIfTI whose
     values are constant within each parcel, the same way isps.py paints them.
 
-    parcel_values shape: (n_parcels, n_emotions). Returns (parc_path, vol_path,
-    affine).
+    parcel_values shape: (n_parcels, n_emotions). Returns (parc_path, vol_path, affine).
     """
     n_parcels, n_emotions = parcel_values.shape
     affine = np.eye(4)
     parc_data = np.zeros((4, 4, 4), dtype=np.int32)
     flat = parc_data.reshape(-1)
     for p in range(1, n_parcels + 1):
-        # assign 2 voxels per parcel
         flat[2 * (p - 1):2 * p] = p
     parc_img = nib.Nifti1Image(parc_data, affine)
     parc_path = tmp_path / 'parc.nii.gz'
